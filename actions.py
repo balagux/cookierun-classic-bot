@@ -53,7 +53,9 @@ from config import (
     NO_LIVES_TO_RECEIVE_TEMPLATE,
     NO_LIVES_TO_RECEIVE_TEMPLATE,
     PLAY_BUTTON,
+    PAUSE_GAME_BUTTON,
     PURCHASE_BUTTON,
+    QUIT_GAME_BUTTON,
     QUICK_RECEIVE_AND_SEND_LIVES_BUTTON,
     RANDOM_BOOST_ITEM,
     RANDOM_BOOST_REGION,
@@ -62,8 +64,13 @@ from config import (
     RELIC_CLAIM_BUTTON,
     RELIC_CLOSE_BUTTON,
     RELIC_COMPLETE_BUTTON,
+    RELAY_QUICK_EXIT_MIN_WAIT,
+    RELAY_QUICK_EXIT_RUNOUT_BUFFER,
+    RELAY_QUICK_EXIT_TIMEOUT,
     START_BUTTON,
     CONNECTION_LOST_RELOAD_BUTTON,
+    STAGE_GAME_RELAY_REGION,
+    STAGE_GAME_RELAY_TEMPLATE,
 )
 from detection import detect_templates, detect_anti_bot_odd_cards, detect_stage
 from config import (
@@ -194,10 +201,29 @@ def using_fast_start():
     time.sleep(random.uniform(0.8, 1.2))
 
 
-def using_cookie_relay():
+def using_cookie_relay(wait_after=True):
     print("🍪 Using Cookie Relay...")
     safe_device_tap(DEVICE_IP, DEVICE_PORT, COOKIE_RELAY_USE_BUTTON[0], COOKIE_RELAY_USE_BUTTON[1])
-    time.sleep(random.uniform(0.8, 1.2))
+    if wait_after:
+        time.sleep(random.uniform(0.8, 1.2))
+
+
+def quick_exit_after_cookie_relay():
+    """Wait for cookie two to run out, then leave through Pause -> Quit."""
+    print("🏃 Waiting for the second cookie to run out...")
+    started_at = time.monotonic()
+    time.sleep(RELAY_QUICK_EXIT_MIN_WAIT)
+    while time.monotonic() - started_at < RELAY_QUICK_EXIT_TIMEOUT:
+        screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
+        if not detect_templates(screen, STAGE_GAME_RELAY_TEMPLATE, STAGE_GAME_RELAY_REGION):
+            break
+        time.sleep(0.12)
+    time.sleep(RELAY_QUICK_EXIT_RUNOUT_BUFFER)
+    print("⏸️ Second cookie is running — opening Pause and quitting to Main Menu...")
+    device_tap(DEVICE_IP, DEVICE_PORT, PAUSE_GAME_BUTTON[0], PAUSE_GAME_BUTTON[1])
+    time.sleep(0.22)
+    device_tap(DEVICE_IP, DEVICE_PORT, QUIT_GAME_BUTTON[0], QUIT_GAME_BUTTON[1])
+    time.sleep(0.35)
 
 
 def complete_finish():

@@ -30,6 +30,7 @@ from actions import (
     purchase_cookie_relay,
     purchase_desired_random_boost,
     purchase_fast_start,
+    quick_exit_after_cookie_relay,
     start_game,
     using_cookie_relay,
     using_fast_start,
@@ -99,6 +100,11 @@ def get_detection_stage_names(group_name):
             if stage_name not in stage_names:
                 stage_names.append(stage_name)
     return stage_names
+
+
+def should_quick_exit_after_relay(options):
+    """Quick-exit only during automated replay, never while recording a profile."""
+    return bool(options.get("use_cookie_relay") and not options.get("record_profile"))
 
 
 def prompt_user_options():
@@ -354,6 +360,7 @@ def main(options=None, device_ip=None, device_port=None):
         macro_thread = None
         macro_stop_event = None
         retry_interrupted_run = False
+        relay_quick_exit_pending = False
         session_run_count = 0
         completed_run_count = 0
         session_coins = 0
@@ -389,8 +396,20 @@ def main(options=None, device_ip=None, device_port=None):
 
             if stage == "MAINMENU":
                 print("🎮 Detected Stage: MAINMENU")
+                quick_exit_return = relay_quick_exit_pending
+                if quick_exit_return:
+                    relay_quick_exit_pending = False
+                    completed_run_count += 1
+                    current_profile_path = None
+                    current_profile_stats = {"coins": 0, "exp": 0}
+                    print("✅ Relay quick-exit round confirmed at Main Menu.")
+                    print(
+                        f"[STATS] attempts={session_run_count} completed={completed_run_count} "
+                        f"coins={session_coins} exp={session_exp}"
+                    )
                 premature_return = (
-                    not options.get("record_profile")
+                    not quick_exit_return
+                    and not options.get("record_profile")
                     and detection_group == "IN_GAME"
                     and game_macro_started
                 )
@@ -416,7 +435,7 @@ def main(options=None, device_ip=None, device_port=None):
                         f"coins={session_coins} exp={session_exp}"
                     )
                 # Wait screen refresh
-                refresh_wait = 1.0 if premature_return else 5.0
+                refresh_wait = 0.5 if quick_exit_return else (1.0 if premature_return else 5.0)
                 print(f"⏳ Waiting {refresh_wait:.0f} seconds for screen refresh...")
                 time.sleep(refresh_wait)
                 if recorder is not None and options.get("record_profile"):
@@ -480,7 +499,9 @@ def main(options=None, device_ip=None, device_port=None):
                     last_stage = None
                     continue
                 if not is_first_game:
-                    if retry_interrupted_run:
+                    if quick_exit_return:
+                        print("⚡ Relay quick-exit complete — starting the next run immediately...")
+                    elif retry_interrupted_run:
                         print("🔄 Retrying the interrupted run immediately...")
                     else:
                         delay = random.uniform(*NEXT_GAME_DELAY)
@@ -552,9 +573,24 @@ def main(options=None, device_ip=None, device_port=None):
             elif stage == "GAME_RELAY":
                 print("🔄 Detected Stage: GAME_RELAY")
                 if options["use_cookie_relay"]:
-                    using_cookie_relay()
+                    quick_exit_enabled = should_quick_exit_after_relay(options)
+                    if quick_exit_enabled:
+                        if macro_stop_event is not None:
+                            macro_stop_event.set()
+                        if macro_thread is not None:
+                            macro_thread.join(timeout=5)
+                        macro_thread = None
+                        macro_stop_event = None
+                        game_macro_started = False
+                        using_cookie_relay(wait_after=False)
+                        quick_exit_after_cookie_relay()
+                        relay_quick_exit_pending = True
+                        last_stage = None
+                    else:
+                        using_cookie_relay()
                 detection_group = "IN_GAME"
             elif stage == "GAME_COMPLETE":
+                relay_quick_exit_pending = False
                 if macro_stop_event is not None:
                     macro_stop_event.set()
                 if macro_thread is not None:
