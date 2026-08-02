@@ -46,7 +46,14 @@ class CookieRunBotGUI:
         self.replay_count_var = tk.StringVar(value="0")
         self.status_var = tk.StringVar(value="พร้อมใช้งาน")
         self.profile_count_var = tk.StringVar(value="ยังไม่มีโปรไฟล์")
-        self.session_stats_var = tk.StringVar(value="Session: 0 รอบ • 0 Coins • 0 EXP")
+        self.session_stats_var = tk.StringVar(
+            value="รอบ 0/0 • Coins 0 (เฉลี่ย 0) • EXP 0 (เฉลี่ย 0)"
+        )
+        self.session_runs_var = tk.StringVar(value="0 / 0")
+        self.session_coins_total_var = tk.StringVar(value="0")
+        self.session_coins_average_var = tk.StringVar(value="เฉลี่ย 0 / รอบ")
+        self.session_exp_total_var = tk.StringVar(value="0")
+        self.session_exp_average_var = tk.StringVar(value="เฉลี่ย 0 / รอบ")
 
         self._create_app_icon()
         self._configure_styles()
@@ -650,7 +657,7 @@ class CookieRunBotGUI:
         self._append_log("\n──────── เริ่มการทำงาน ────────\n")
         self.process_mode = mode
         if mode == "bot":
-            self.session_stats_var.set("Session: 0 รอบ • 0 Coins • 0 EXP")
+            self._set_session_stats(0, 0, 0, 0)
         self.stop_requested = False
         self._set_running_controls(True)
         self._set_status("กำลังอัดการเล่น" if mode == "record" else "บอทกำลังทำงาน", "running")
@@ -946,9 +953,34 @@ class CookieRunBotGUI:
         if not match:
             return
         attempts, completed, coins, exp = (int(value) for value in match.groups())
+        self._set_session_stats(attempts, completed, coins, exp)
+
+    @staticmethod
+    def _format_session_average(total, completed):
+        if completed <= 0:
+            return "0"
+        average = total / completed
+        if average.is_integer():
+            return f"{int(average):,}"
+        return f"{average:,.1f}"
+
+    def _set_session_stats(self, attempts, completed, coins, exp):
+        attempts = max(0, int(attempts))
+        completed = max(0, int(completed))
+        coins = max(0, int(coins))
+        exp = max(0, int(exp))
+        average_coins = self._format_session_average(coins, completed)
+        average_exp = self._format_session_average(exp, completed)
+
         self.session_stats_var.set(
-            f"Session: {completed}/{attempts} รอบ • {coins:,} Coins • {exp:,} EXP"
+            f"รอบ {completed}/{attempts} • Coins {coins:,} (เฉลี่ย {average_coins}) "
+            f"• EXP {exp:,} (เฉลี่ย {average_exp})"
         )
+        self.session_runs_var.set(f"{completed:,} / {attempts:,}")
+        self.session_coins_total_var.set(f"{coins:,}")
+        self.session_coins_average_var.set(f"เฉลี่ย {average_coins} / รอบ")
+        self.session_exp_total_var.set(f"{exp:,}")
+        self.session_exp_average_var.set(f"เฉลี่ย {average_exp} / รอบ")
 
     def _set_status(self, text, state):
         colors = {

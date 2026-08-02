@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from adb import ADB_EXECUTABLE, ADB_SUBPROCESS_FLAGS, _resolve_device_target, adb_run
-from config import REPLAY_INPUT_LEAD_TIME
+from config import LEGACY_REPLAY_START_DELAY, REPLAY_INPUT_LEAD_TIME
 from runtime_paths import app_path
 
 
@@ -157,9 +157,13 @@ class TouchRecorder:
         self._lock = threading.Lock()
         self._save_lock = threading.Lock()
 
-    def start(self):
+    def start(self, timeline_started_at=None):
         target = _resolve_device_target(self.ip, self.port)
-        self._started_at = time.monotonic()
+        self._started_at = (
+            float(timeline_started_at)
+            if timeline_started_at is not None
+            else time.monotonic()
+        )
         self._created_at = time.strftime("%Y-%m-%d %H:%M:%S")
         if self.autosave_path is not None:
             self.autosave_path.parent.mkdir(parents=True, exist_ok=True)
@@ -339,7 +343,8 @@ class TouchRecorder:
                 default=0.0,
             )
             data = {
-                "version": 3,
+                "version": 4,
+                "timeline_origin": "play_tap",
                 "name": self.profile_name or path.stem,
                 "created_at": self._created_at or time.strftime("%Y-%m-%d %H:%M:%S"),
                 "duration_seconds": round(duration_seconds, 3),
@@ -373,16 +378,14 @@ class TouchRecorder:
             self.thread.join(timeout=2)
 
 
-def _play_action(target, action):
+def _action_command(target, action):
     if action.get("type") == "control":
         x, y = CONTROL_COORDS[action["control"]]
         duration_ms = max(20, int(float(action.get("duration", 0.05)) * 1000))
-        command = [
+        return [
             ADB_EXECUTABLE, "-s", target, "shell", "input", "swipe",
             str(x), str(y), str(x), str(y), str(duration_ms),
         ]
-        adb_run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        return
 
     if action.get("type") == "key":
         key_code = f"KEYCODE_{action['key']}"
@@ -390,8 +393,7 @@ def _play_action(target, action):
         if float(action.get("duration", 0.0)) >= 0.35:
             command.append("--longpress")
         command.append(key_code)
-        adb_run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        return
+        return command
 
     # Reuse the exact recorded coordinates. Variation should come from selecting
     # different profiles, not from shifting a carefully recorded jump/slide.
@@ -407,13 +409,31 @@ def _play_action(target, action):
     y2 = max(0, min(SCREEN_HEIGHT - 1, y2))
 
     if duration_ms <= 80 and abs(x2 - x1) < 8 and abs(y2 - y1) < 8:
-        command = [ADB_EXECUTABLE, "-s", target, "shell", "input", "tap", str(x1), str(y1)]
-    else:
-        command = [
-            ADB_EXECUTABLE, "-s", target, "shell", "input", "swipe",
-            str(x1), str(y1), str(x2), str(y2), str(duration_ms),
-        ]
-    adb_run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        return [ADB_EXECUTABLE, "-s", target, "shell", "input", "tap", str(x1), str(y1)]
+    return [
+        ADB_EXECUTABLE, "-s", target, "shell", "input", "swipe",
+        str(x1), str(y1), str(x2), str(y2), str(duration_ms),
+    ]
+
+
+def _play_action(target, action):
+    """Compatibility helper for callers that need to execute one action synchronously."""
+    return adb_run(
+        _action_command(target, action),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+
+def _launch_action(target, action):
+    """Dispatch an input immediately without adding a scheduler thread per action."""
+    return subprocess.Popen(
+        _action_command(target, action),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=ADB_SUBPROCESS_FLAGS,
+    )
 
 
 def _wait_until(deadline, stop_event=None):
@@ -436,7 +456,15 @@ def _wait_until(deadline, stop_event=None):
             time.sleep(0)
 
 
-def replay_profile(ip, port, path, stop_event=None):
+def _resolve_replay_start(data, timeline_started_at):
+    if timeline_started_at is None:
+        return time.monotonic(), False
+    if data.get("timeline_origin") == "play_tap":
+        return float(timeline_started_at), False
+    return float(timeline_started_at) + LEGACY_REPLAY_START_DELAY, True
+
+
+def replay_profile(ip, port, path, stop_event=None, timeline_started_at=None):
     path = Path(path)
     data = json.loads(path.read_text(encoding="utf-8"))
     actions = data.get("actions", [])
@@ -444,20 +472,44 @@ def replay_profile(ip, port, path, stop_event=None):
         raise ValueError(f"Recording has no touch actions: {path.name}")
 
     target = _resolve_device_target(ip, port)
-    started_at = time.monotonic()
-    workers = []
-    replayed_count = 0
-    for action in actions:
-        deadline = started_at + max(
-            0.0,
-            float(action["at"]) - REPLAY_INPUT_LEAD_TIME,
+    started_at, legacy_timing = _resolve_replay_start(data, timeline_started_at)
+    if legacy_timing:
+        print(
+            "[REPLAY_TIMING] Legacy profile: using the old 1.1s start offset. "
+            "Record this profile again for exact Play-tap timing."
         )
-        if not _wait_until(deadline, stop_event):
-            break
-        worker = threading.Thread(target=_play_action, args=(target, action), daemon=True)
-        worker.start()
-        workers.append(worker)
-        replayed_count += 1
-    for worker in workers:
-        worker.join()
+    processes = []
+    dispatch_lateness = []
+    replayed_count = 0
+    timer_resolution_enabled = False
+    if os.name == "nt":
+        try:
+            timer_resolution_enabled = ctypes.windll.winmm.timeBeginPeriod(1) == 0
+        except (AttributeError, OSError):
+            timer_resolution_enabled = False
+    try:
+        for action in actions:
+            deadline = started_at + max(
+                0.0,
+                float(action["at"]) - REPLAY_INPUT_LEAD_TIME,
+            )
+            if not _wait_until(deadline, stop_event):
+                break
+            dispatched_at = time.monotonic()
+            processes.append(_launch_action(target, action))
+            dispatch_lateness.append(max(0.0, dispatched_at - deadline))
+            replayed_count += 1
+        for process in processes:
+            process.wait()
+    finally:
+        if timer_resolution_enabled:
+            ctypes.windll.winmm.timeEndPeriod(1)
+    if dispatch_lateness:
+        average_late_ms = sum(dispatch_lateness) * 1000 / len(dispatch_lateness)
+        maximum_late_ms = max(dispatch_lateness) * 1000
+        print(
+            f"[REPLAY_TIMING] lead={REPLAY_INPUT_LEAD_TIME * 1000:.0f}ms "
+            f"dispatch_avg_late={average_late_ms:.1f}ms "
+            f"dispatch_max_late={maximum_late_ms:.1f}ms"
+        )
     return replayed_count

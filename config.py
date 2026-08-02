@@ -11,6 +11,7 @@ MATCH_THRESHOLD = 0.8
 SESSION_RESET_INTERVAL = (5400, 10800)  # 1.5-3 hours
 NEXT_GAME_DELAY = (3, 7)  # seconds between completed runs
 REPLAY_INPUT_LEAD_TIME = 0.04  # measured Windows -> LDPlayer ADB input latency
+LEGACY_REPLAY_START_DELAY = 1.1  # midpoint of the old random 0.8-1.4 second delay
 RESULT_REWARD_MIN_WAIT = 2.5  # let multiplier/count-up animations finish
 RESULT_REWARD_POLL_INTERVAL = 0.45
 RESULT_REWARD_STABLE_READS = 3

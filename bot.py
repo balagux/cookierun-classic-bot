@@ -144,7 +144,7 @@ def configure_device(device_ip, device_port):
     actions_module.DEVICE_PORT = DEVICE_PORT
 
 
-def _replay_profile_safely(profile_path, stop_event=None):
+def _replay_profile_safely(profile_path, stop_event=None, timeline_started_at=None):
     try:
         print(f"🎬 Replaying recorded run: {Path(profile_path).name}")
         action_count = replay_profile(
@@ -152,6 +152,7 @@ def _replay_profile_safely(profile_path, stop_event=None):
             DEVICE_PORT,
             profile_path,
             stop_event=stop_event,
+            timeline_started_at=timeline_started_at,
         )
         if stop_event is not None and stop_event.is_set():
             print(f"⏹️ Replay cancelled cleanly after {action_count} touch actions.")
@@ -504,7 +505,7 @@ def main(options=None, device_ip=None, device_port=None):
                     purchase_cookie_relay()
                 if options["use_desired_random_boost"]:
                     purchase_desired_random_boost(options["desired_boost_template"], options["desired_boost_name"])
-                play_game()
+                run_timeline_started_at = play_game()
                 current_profile_stats = {"coins": 0, "exp": 0}
                 current_profile_path = None
                 if not options.get("record_profile"):
@@ -524,7 +525,7 @@ def main(options=None, device_ip=None, device_port=None):
                             autosave_path=record_path,
                             profile_name=options.get("profile_name"),
                         )
-                        recorder.start()
+                        recorder.start(timeline_started_at=run_timeline_started_at)
                         print("🔴 Recording started after Play — play this run yourself now.")
                     elif replay_profiles:
                         selected_profile = random.choice(replay_profiles)
@@ -536,7 +537,7 @@ def main(options=None, device_ip=None, device_port=None):
                         macro_stop_event = threading.Event()
                         macro_thread = threading.Thread(
                             target=_replay_profile_safely,
-                            args=(selected_profile, macro_stop_event),
+                            args=(selected_profile, macro_stop_event, run_timeline_started_at),
                             daemon=True,
                         )
                         macro_thread.start()

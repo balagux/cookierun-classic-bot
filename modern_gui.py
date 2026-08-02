@@ -326,7 +326,8 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         body = ctk.CTkFrame(workspace, fg_color="transparent")
         body.grid(row=1, column=0, sticky="nsew", padx=17, pady=13)
         body.grid_columnconfigure(0, weight=1)
-        body.grid_rowconfigure(2, weight=1)
+        body.grid_rowconfigure(1, weight=1, minsize=330)
+        body.grid_rowconfigure(2, weight=0, minsize=155)
 
         settings_row = ctk.CTkFrame(body, fg_color="transparent")
         settings_row.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
@@ -415,17 +416,6 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
 
         profiles = self._card(body, 1)
         profile_header = self._section_header(profiles, "profiles", "โปรไฟล์การเล่น", "เลือกเพื่อแก้ไข หรือลบโปรไฟล์")
-        self.session_label = ctk.CTkLabel(
-            profile_header,
-            textvariable=self.session_stats_var,
-            height=28,
-            corner_radius=9,
-            fg_color="#F7F8FB",
-            text_color="#777C91",
-            font=self._font(9),
-            padx=10,
-        )
-        self.session_label.pack(side="right")
         self.profile_count_label = ctk.CTkLabel(
             profile_header,
             textvariable=self.profile_count_var,
@@ -436,11 +426,42 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             font=self._font(9, "bold"),
             padx=10,
         )
-        self.profile_count_label.pack(side="right", padx=(0, 8))
+        self.profile_count_label.pack(side="right")
+
+        session_summary = ctk.CTkFrame(profiles, fg_color="transparent")
+        session_summary.pack(fill="x", padx=16, pady=(0, 9))
+        session_summary.grid_columnconfigure((0, 1, 2), weight=1, uniform="session_summary")
+        self._session_summary_tile(
+            session_summary,
+            0,
+            "check",
+            "รอบที่เล่นสำเร็จ",
+            self.session_runs_var,
+            detail_text="สำเร็จ / เริ่มทั้งหมด",
+            accent=("#E9F8F0", "#23815C"),
+        )
+        self._session_summary_tile(
+            session_summary,
+            1,
+            "coin",
+            "Coins ทั้งหมด",
+            self.session_coins_total_var,
+            detail_var=self.session_coins_average_var,
+            accent=("#FFF5D8", "#B27A05"),
+        )
+        self._session_summary_tile(
+            session_summary,
+            2,
+            "xp",
+            "EXP ทั้งหมด",
+            self.session_exp_total_var,
+            detail_var=self.session_exp_average_var,
+            accent=("#FFEAF0", "#C74268"),
+        )
 
         self.profile_scroll = ctk.CTkScrollableFrame(
             profiles,
-            height=270,
+            height=218,
             corner_radius=14,
             fg_color="#F7F8FC",
             scrollbar_button_color="#D9DCE7",
@@ -570,6 +591,50 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         copy.pack(side="left", fill="y", pady=(8, 6))
         ctk.CTkLabel(copy, text=label, text_color=MUTED, font=self._font(8, "bold"), anchor="w").pack(anchor="w")
         ctk.CTkLabel(copy, text=value, text_color=accent[1], font=self._font(12, "bold"), anchor="w").pack(anchor="w")
+        return tile
+
+    def _session_summary_tile(
+        self,
+        parent,
+        column,
+        icon,
+        title,
+        value_var,
+        detail_var=None,
+        detail_text="",
+        accent=(PURPLE_SOFT, PURPLE),
+    ):
+        tile = ctk.CTkFrame(
+            parent,
+            height=78,
+            corner_radius=13,
+            fg_color="#FAFAFD",
+            border_width=1,
+            border_color=BORDER,
+        )
+        tile.grid(
+            row=0,
+            column=column,
+            sticky="nsew",
+            padx=(0 if column == 0 else 4, 0 if column == 2 else 4),
+        )
+        tile.grid_propagate(False)
+        icon_box = ctk.CTkFrame(tile, width=40, height=40, corner_radius=11, fg_color=accent[0])
+        icon_box.pack(side="left", padx=(13, 10), pady=18)
+        icon_box.pack_propagate(False)
+        ctk.CTkLabel(icon_box, text="", image=self.icons[icon]).place(relx=0.5, rely=0.5, anchor="center")
+        copy = ctk.CTkFrame(tile, fg_color="transparent")
+        copy.pack(side="left", fill="y", pady=(8, 6))
+        ctk.CTkLabel(copy, text=title, text_color=MUTED, font=self._font(9, "bold"), anchor="w").pack(anchor="w")
+        ctk.CTkLabel(copy, textvariable=value_var, text_color=accent[1], font=self._font(15, "bold"), anchor="w").pack(anchor="w")
+        detail_options = {"textvariable": detail_var} if detail_var is not None else {"text": detail_text}
+        ctk.CTkLabel(
+            copy,
+            text_color="#969BAD",
+            font=self._font(8),
+            anchor="w",
+            **detail_options,
+        ).pack(anchor="w")
         return tile
 
     def _bind_profile_card(self, widget, path):
