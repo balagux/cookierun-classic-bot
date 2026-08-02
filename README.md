@@ -4,7 +4,7 @@
 OpenCV ตรวจหน้าจอ และระบบ Record/Replay สำหรับบันทึกการกระโดดและสไลด์ พร้อม GUI ภาษาไทย
 แบบ Profile Gallery
 
-> เวอร์ชันปัจจุบัน: **1.3.4**
+> เวอร์ชันปัจจุบัน: **1.3.5**
 > โปรแกรมนี้เป็นโครงการทดลองสำหรับการเรียนรู้ระบบ Automation และ Computer Vision
 > การใช้งานกับบัญชีจริงอาจขัดกับข้อกำหนดของเกม ผู้ใช้ต้องรับผิดชอบความเสี่ยงด้วยตนเอง
 
@@ -311,15 +311,18 @@ installer\CookieRunClassicBot-Setup.exe
 ## หมายเหตุ
 
 - Coordinate และ Template ทั้งหมดออกแบบสำหรับ **1280×720**
-- **800×600 ยังไม่รองรับ** โปรแกรมจะหยุดพร้อมแจ้งความละเอียดแทนการกดด้วยพิกัดผิด
+- **ความละเอียดหน้าจอเกม/LDPlayer 800×600 ยังไม่รองรับ** โปรแกรมจะหยุดพร้อมแจ้งแทนการกดด้วยพิกัดผิด (คนละส่วนกับหน้าต่าง GUI ซึ่งเปิดบนจอคอม 800×600 ได้)
 - โปรไฟล์ Version 3 และเก่ากว่ายังเปิดได้ด้วย offset compatibility 1.1 วินาที แต่ควรอัดใหม่ด้วย Version 4 เพื่อใช้ timeline จากจังหวะกด Play โดยตรง
 - UI หรือภาพในเกมเปลี่ยนอาจทำให้ต้องถ่าย Template ใหม่
 - Timing อาจต่างกันตามสเปกเครื่องและอาการ Lag ของ Emulator
 - โปรเจกต์ยังไม่ได้ระบุสัญญาอนุญาต (License) สำหรับการนำไปแจกจ่ายต่อ
 
-## ผลตรวจรุ่น 1.3.4
+## ผลตรวจรุ่น 1.3.5
 
-- Automated tests ผ่าน 20 รายการ: Record/Replay timing, Relay quick-exit, Anti-Bot, Stage/Template, OCR statistics, session timer/reset และ app reset
+- Automated tests ผ่าน 24 รายการ: Record/Replay timing, Relay quick-exit, Anti-Bot, Stage/Template, OCR statistics, session timer/reset, app reset, responsive GUI และ Windows DPI scaling
+- หน้าต่าง GUI ปรับขนาดตามพื้นที่จอคอมอัตโนมัติ รองรับทั้ง 1024×768 และ 800×600 โดยไม่ล้นออกนอกจอ
+- โหมดจอเล็กมี Scroll ทั้งแถบเมนูซ้ายและเนื้อหาหลัก พร้อมย้าย START/STOP ไว้ด้านบนให้กดได้ทันที
+- การ์ดตั้งค่า สรุป Coins/EXP และโปรไฟล์จะเรียงใหม่ตามความกว้างเพื่อไม่ให้ข้อความหรือปุ่มถูกตัด
 - ทดสอบจริง 1 รอบที่ 1280×720 ผ่าน Main Menu → ตรวจ stock Cookie Relay → เลือก Double Coins → Replay → Relay → Pause/Quit/Confirm → Result OCR → Mystery Box → Main Menu
 - ผล OCR จากรอบทดสอบจริง: `101,055 Coins` และ `3,266 EXP` หลังรอค่าคงที่
 - หน้า Party Run มี handler แล้ว และกรอบ Too Many Treasures มีขนาดพอสำหรับ Template
