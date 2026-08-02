@@ -85,7 +85,10 @@ def _check_connection(ip, port):
     height, width = screen.shape[:2]
     print(f"✅ Connected successfully — screen resolution {width}x{height}")
     if (width, height) != (1280, 720):
-        print("⚠️ The bot requires 1280x720. Please change the emulator resolution before starting.")
+        raise RuntimeError(
+            f"Unsupported screen resolution {width}x{height}. "
+            "Please change LDPlayer to 1280x720 before starting the bot."
+        )
 
 
 def main(argv=None):

@@ -20,11 +20,10 @@ from actions import (
     accept_relic_claim,
     accept_too_many_treasures,
     close_announcement_dialog,
+    close_party_run_mode,
     complete_finish,
     handle_anti_bot,
     handle_inactive,
-    handle_quick_receive_and_send_lives,
-    handle_send_friend_life,
     open_relic_complete,
     play_game,
     purchase_cookie_relay,
@@ -201,22 +200,6 @@ def _dismiss_visible_confirm_buttons(screen, max_clicks=8, action_lock=None):
     return click_count, current_screen
 
 
-def _confirm_button_watcher(stop_event, action_lock):
-    """Clear Confirm dialogs even while the main bot is waiting in another action."""
-    while not stop_event.is_set():
-        try:
-            screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
-            click_count, _ = _dismiss_visible_confirm_buttons(
-                screen,
-                action_lock=action_lock,
-            )
-            wait_seconds = 0.05 if click_count else 0.2
-        except Exception as exc:
-            print(f"[CONFIRM] Watcher capture failed; retrying: {exc}")
-            wait_seconds = 1.0
-        stop_event.wait(wait_seconds)
-
-
 def _read_stable_result_rewards(
     initial_screen,
     capture_func=None,
@@ -321,23 +304,22 @@ def main(options=None, device_ip=None, device_port=None):
         )
 
     recorder = None
-    confirm_stop_event = None
-    confirm_thread = None
     try:
         print("🚀 CookieRun Classic Bot Started")
         print("⚠️ Screen must be 1280x720 resolution for the bot to work properly.")
         print(f"📱 Connecting to device at {DEVICE_IP}:{DEVICE_PORT}...")
 
         device_connect(DEVICE_IP, DEVICE_PORT)
+        initial_screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
+        if initial_screen is None:
+            raise RuntimeError("Connected, but the device screenshot could not be decoded.")
+        screen_height, screen_width = initial_screen.shape[:2]
+        if (screen_width, screen_height) != (1280, 720):
+            raise RuntimeError(
+                f"Unsupported screen resolution {screen_width}x{screen_height}; "
+                "this version requires LDPlayer 1280x720."
+            )
         load_templates()
-        confirm_stop_event = threading.Event()
-        confirm_action_lock = threading.Lock()
-        confirm_thread = threading.Thread(
-            target=_confirm_button_watcher,
-            args=(confirm_stop_event, confirm_action_lock),
-            daemon=True,
-        )
-        confirm_thread.start()
 
         # * for debugging *
         # device_screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
@@ -352,15 +334,13 @@ def main(options=None, device_ip=None, device_port=None):
         last_detected_time = time.time()
         session_start_time = time.time()
         session_reset_interval = random.uniform(*SESSION_RESET_INTERVAL)
-        last_lives_time = time.time()
-        lives_interval = random.uniform(25 * 60, 35 * 60)
-        pending_send_friend_life = False
         recording_completed = False
         game_macro_started = False
         macro_thread = None
         macro_stop_event = None
         retry_interrupted_run = False
         relay_quick_exit_pending = False
+        relay_quick_exit_rewards = {"coins": 0, "exp": 0}
         session_run_count = 0
         completed_run_count = 0
         session_coins = 0
@@ -373,10 +353,7 @@ def main(options=None, device_ip=None, device_port=None):
             # The watcher owns the click. The main loop pauses so it cannot also
             # trigger a stage action against the same dialog or the screen below it.
             if detect_all_template_matches(device_screen, GLOBAL_CONFIRM_TEMPLATE):
-                _dismiss_visible_confirm_buttons(
-                    device_screen,
-                    action_lock=confirm_action_lock,
-                )
+                _dismiss_visible_confirm_buttons(device_screen)
                 last_stage = None
                 last_detected_time = time.time()
                 continue
@@ -400,6 +377,9 @@ def main(options=None, device_ip=None, device_port=None):
                 if quick_exit_return:
                     relay_quick_exit_pending = False
                     completed_run_count += 1
+                    session_coins += int(relay_quick_exit_rewards.get("coins", 0))
+                    session_exp += int(relay_quick_exit_rewards.get("exp", 0))
+                    relay_quick_exit_rewards = {"coins": 0, "exp": 0}
                     current_profile_path = None
                     current_profile_stats = {"coins": 0, "exp": 0}
                     print("✅ Relay quick-exit round confirmed at Main Menu.")
@@ -435,7 +415,7 @@ def main(options=None, device_ip=None, device_port=None):
                         f"coins={session_coins} exp={session_exp}"
                     )
                 # Wait screen refresh
-                refresh_wait = 0.5 if quick_exit_return else (1.0 if premature_return else 5.0)
+                refresh_wait = 0.5 if quick_exit_return else 1.0
                 print(f"⏳ Waiting {refresh_wait:.0f} seconds for screen refresh...")
                 time.sleep(refresh_wait)
                 if recorder is not None and options.get("record_profile"):
@@ -465,34 +445,16 @@ def main(options=None, device_ip=None, device_port=None):
                         f"Estimated total: {session_coins:,} coins, {session_exp:,} EXP."
                     )
                     return
-                if pending_send_friend_life:
-                    print("💌 Sending friend lives after app reset...")
-                    handle_send_friend_life()
-                    pending_send_friend_life = False
-                    last_lives_time = time.time()
-                    last_stage = None
-                    continue
                 elapsed = time.time() - session_start_time
                 if elapsed >= session_reset_interval:
                     print(f"🔄 Session reset triggered after {elapsed / 3600:.2f}h — restarting app...")
                     device_reset_app(DEVICE_IP, DEVICE_PORT)
                     close_announcement_dialog()
-                    pending_send_friend_life = True
                     session_start_time = time.time()
                     session_reset_interval = random.uniform(*SESSION_RESET_INTERVAL)
-                    last_lives_time = time.time()
-                    lives_interval = random.uniform(25 * 60, 35 * 60)
                     detection_group = "PRE_GAME"
                     last_stage = None
                     is_first_game = True
-                    continue
-                lives_elapsed = time.time() - last_lives_time
-                if lives_elapsed >= lives_interval:
-                    print(f"💌 ~30 min passed ({lives_elapsed / 60:.1f} min) — receiving and sending lives...")
-                    handle_quick_receive_and_send_lives()
-                    last_lives_time = time.time()
-                    lives_interval = random.uniform(25 * 60, 35 * 60)
-                    last_stage = None
                     continue
                 if detection_group == "POST_GAME":
                     detection_group = "PRE_GAME"
@@ -511,6 +473,7 @@ def main(options=None, device_ip=None, device_port=None):
                 is_first_game = False
                 start_game()
                 detection_group = "PRE_GAME"
+                last_stage = None
             elif stage == "PURCHASE_ITEM":
                 print("🛒 Detected Stage: PURCHASE_ITEM")
                 if macro_stop_event is not None:
@@ -570,6 +533,7 @@ def main(options=None, device_ip=None, device_port=None):
                 if options["use_fast_start"]:
                     using_fast_start()
                 detection_group = "IN_GAME"
+                last_stage = None
             elif stage == "GAME_RELAY":
                 print("🔄 Detected Stage: GAME_RELAY")
                 if options["use_cookie_relay"]:
@@ -583,14 +547,51 @@ def main(options=None, device_ip=None, device_port=None):
                         macro_stop_event = None
                         game_macro_started = False
                         using_cookie_relay(wait_after=False)
-                        quick_exit_after_cookie_relay()
-                        relay_quick_exit_pending = True
+                        relay_quick_exit_pending = quick_exit_after_cookie_relay()
                         last_stage = None
                     else:
                         using_cookie_relay()
-                detection_group = "IN_GAME"
+                detection_group = "POST_GAME" if relay_quick_exit_pending else "IN_GAME"
+                last_stage = None
             elif stage == "GAME_COMPLETE":
-                relay_quick_exit_pending = False
+                if relay_quick_exit_pending:
+                    if macro_stop_event is not None:
+                        macro_stop_event.set()
+                    if macro_thread is not None:
+                        macro_thread.join(timeout=5)
+                    macro_thread = None
+                    macro_stop_event = None
+                    try:
+                        (
+                            result_coins,
+                            result_exp,
+                            ocr_details,
+                            device_screen,
+                            rewards_stable,
+                        ) = _read_stable_result_rewards(device_screen)
+                        result_coins = int(result_coins or 0)
+                        result_exp = int(result_exp or 0)
+                        print(
+                            f"[OCR] Relay quick result: coins={result_coins} exp={result_exp} "
+                            f"stable={rewards_stable} details={ocr_details}"
+                        )
+                    except Exception as exc:
+                        result_coins = result_exp = 0
+                        print(f"[OCR] Relay quick result could not be read: {exc}")
+                    relay_quick_exit_rewards = {
+                        "coins": result_coins,
+                        "exp": result_exp,
+                    }
+                    _save_profile_rewards(
+                        current_profile_path,
+                        result_coins if result_coins > 0 else None,
+                        result_exp if result_exp > 0 else None,
+                    )
+                    complete_finish(wait_after=False)
+                    game_macro_started = False
+                    detection_group = "POST_GAME"
+                    last_stage = None
+                    continue
                 if macro_stop_event is not None:
                     macro_stop_event.set()
                 if macro_thread is not None:
@@ -677,10 +678,11 @@ def main(options=None, device_ip=None, device_port=None):
                 complete_finish()
                 game_macro_started = False
                 detection_group = "POST_GAME"
+                last_stage = None
             elif stage == "MYSTERY_BOX":
                 print("🎁 Detected Stage: MYSTERY_BOX")
                 accept_mystery_box()
-                time.sleep(3)
+                time.sleep(0.5)
                 detection_group = "POST_GAME"
                 last_stage = None
             elif stage == "CONGRATULATIONS":
@@ -692,34 +694,42 @@ def main(options=None, device_ip=None, device_port=None):
                 print("⬆️ Detected Stage: LEVEL_UP")
                 accept_level_up()
                 detection_group = "PRE_GAME"
+                last_stage = None
             elif stage == "DAILY_CHECKIN":
                 print("📅 Detected Stage: DAILY_CHECKIN")
                 accept_daily_checkin()
                 detection_group = "PRE_GAME"
+                last_stage = None
             elif stage == "DAILY_CHECKIN_BOOST_SET":
                 print("📅 Detected Stage: DAILY_CHECKIN_BOOST_SET")
                 accept_daily_checkin_boost_set()
                 detection_group = "PRE_GAME"
+                last_stage = None
             elif stage == "DAILY_TREASURE":
                 print("💎 Detected Stage: DAILY_TREASURE")
                 accept_daily_treasure()
                 detection_group = "PRE_GAME"
+                last_stage = None
             elif stage == "DAILY_NEW":
                 print("📰 Detected Stage: DAILY_NEW")
                 accept_daily_new()
                 detection_group = "PRE_GAME"
+                last_stage = None
             elif stage == "ENTER_LEAGUE":
                 print("🏆 Detected Stage: ENTER_LEAGUE")
                 accept_enter_league()
                 detection_group = "PRE_GAME"
+                last_stage = None
             elif stage == "LEAGUE_RESULTS":
                 print("🏆 Detected Stage: LEAGUE_RESULTS")
                 accept_league_results()
                 detection_group = "PRE_GAME"
+                last_stage = None
             elif stage == "PREVIOUS_RANK_RESULTS":
                 print("🏆 Detected Stage: PREVIOUS_RANK_RESULTS")
                 accept_previous_rank_results()
                 detection_group = "PRE_GAME"
+                last_stage = None
             elif stage == "OVERTAKE_BREAK_SCORE":
                 print("🏆 Detected Stage: OVERTAKE_BREAK_SCORE")
                 accept_overtake_break_score()
@@ -729,14 +739,22 @@ def main(options=None, device_ip=None, device_port=None):
                 print("💎 Detected Stage: TOO_MANY_TREASURES")
                 accept_too_many_treasures()
                 detection_group = "PRE_GAME"
+                last_stage = None
             elif stage == "RELIC_COMPLETE":
                 print("🏺 Detected Stage: RELIC_COMPLETE")
                 open_relic_complete()
                 detection_group = "PRE_GAME"
+                last_stage = None
             elif stage == "RELIC_CLAIM":
                 print("🏺 Detected Stage: RELIC_CLAIM")
                 accept_relic_claim()
                 detection_group = "PRE_GAME"
+                last_stage = None
+            elif stage == "PARTY_RUN":
+                print("🎉 Detected Stage: PARTY_RUN")
+                close_party_run_mode()
+                detection_group = "PRE_GAME"
+                last_stage = None
             elif stage == "ANTI_BOT":
                 print("⚠️ Detected Stage: ANTI_BOT")
                 handle_anti_bot(device_screen)
@@ -747,8 +765,6 @@ def main(options=None, device_ip=None, device_port=None):
                 close_announcement_dialog()
                 session_start_time = time.time()
                 session_reset_interval = random.uniform(*SESSION_RESET_INTERVAL)
-                last_lives_time = time.time()
-                lives_interval = random.uniform(25 * 60, 35 * 60)
                 detection_group = "PRE_GAME"
                 last_stage = None
                 is_first_game = True
@@ -767,9 +783,5 @@ def main(options=None, device_ip=None, device_port=None):
             macro_stop_event.set()
         if "macro_thread" in locals() and macro_thread is not None:
             macro_thread.join(timeout=5)
-        if confirm_stop_event is not None:
-            confirm_stop_event.set()
-        if confirm_thread is not None:
-            confirm_thread.join(timeout=2)
         if recorder is not None:
             recorder.stop()

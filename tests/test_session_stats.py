@@ -1,7 +1,17 @@
 import unittest
-import tkinter as tk
 
 from gui import CookieRunBotGUI
+
+
+class MemoryVariable:
+    def __init__(self):
+        self.value = ""
+
+    def set(self, value):
+        self.value = str(value)
+
+    def get(self):
+        return self.value
 
 
 class SessionStatsTests(unittest.TestCase):
@@ -13,14 +23,13 @@ class SessionStatsTests(unittest.TestCase):
         self.assertEqual(CookieRunBotGUI._format_session_average(10, 4), "2.5")
 
     def test_summary_variables_include_totals_and_averages(self):
-        interpreter = tk.Tcl()
         gui = CookieRunBotGUI.__new__(CookieRunBotGUI)
-        gui.session_stats_var = tk.StringVar(interpreter)
-        gui.session_runs_var = tk.StringVar(interpreter)
-        gui.session_coins_total_var = tk.StringVar(interpreter)
-        gui.session_coins_average_var = tk.StringVar(interpreter)
-        gui.session_exp_total_var = tk.StringVar(interpreter)
-        gui.session_exp_average_var = tk.StringVar(interpreter)
+        gui.session_stats_var = MemoryVariable()
+        gui.session_runs_var = MemoryVariable()
+        gui.session_coins_total_var = MemoryVariable()
+        gui.session_coins_average_var = MemoryVariable()
+        gui.session_exp_total_var = MemoryVariable()
+        gui.session_exp_average_var = MemoryVariable()
 
         gui._set_session_stats(4, 3, 269758, 9294)
 

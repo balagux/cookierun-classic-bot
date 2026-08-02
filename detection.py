@@ -5,7 +5,6 @@ import numpy as np
 
 from config import (
     ANTI_BOT_CARD_HEIGHT,
-    ANTI_BOT_CARD_POS_6,
     ANTI_BOT_CARD_WIDTH,
     ANTI_BOT_CARD_POS_1,
     ANTI_BOT_CARD_POS_2,
@@ -140,12 +139,18 @@ def detect_all_template_matches(screen, template_files, region=None, threshold=N
 
 
 def detect_stage(screen, stage_names=None):
-    screen_gray = _normalize_gray(screen)
-    if screen_gray is None:
+    screen_bgr = _normalize(screen)
+    if screen_bgr is None:
         return None
+    screen_gray = cv2.cvtColor(screen_bgr, cv2.COLOR_BGR2GRAY)
     if stage_names is None:
         stage_names = STAGE_TEMPLATES.keys()
     for stage_name in stage_names:
+        # The game alternates between "jumping card" and "sliding card" text.
+        # A full-header template only recognised the older wording, so use the
+        # stable six-card layout and cyan header before falling back to it.
+        if stage_name == "ANTI_BOT" and _is_anti_bot_screen(screen_bgr):
+            return stage_name
         template_files = STAGE_TEMPLATES.get(stage_name)
         if not template_files:
             continue
@@ -166,15 +171,49 @@ def detect_stage(screen, stage_names=None):
     return None
 
 
+def _is_anti_bot_screen(screen):
+    """Recognise either Anti-Bot wording from its stable header/card layout."""
+    screen_bgr = _normalize(screen)
+    if screen_bgr is None or screen_bgr.shape[0] < 700 or screen_bgr.shape[1] < 1172:
+        return False
+
+    hsv = cv2.cvtColor(screen_bgr, cv2.COLOR_BGR2HSV)
+    header = hsv[10:112, 108:1172]
+    cyan = cv2.inRange(header, (80, 80, 80), (105, 255, 255))
+    cyan_ratio = cv2.countNonZero(cyan) / cyan.size
+    if cyan_ratio < 0.50:
+        return False
+
+    card_coords = (
+        ANTI_BOT_CARD_POS_1,
+        ANTI_BOT_CARD_POS_2,
+        ANTI_BOT_CARD_POS_3,
+        ANTI_BOT_CARD_POS_4,
+        ANTI_BOT_CARD_POS_5,
+        ANTI_BOT_CARD_POS_6,
+    )
+    beige_cards = 0
+    for cx, cy in card_coords:
+        card = hsv[
+            cy + 10:cy + ANTI_BOT_CARD_HEIGHT - 10,
+            cx + 10:cx + ANTI_BOT_CARD_WIDTH - 10,
+        ]
+        if card.size == 0:
+            continue
+        beige = cv2.inRange(card, (0, 0, 150), (179, 90, 255))
+        if cv2.countNonZero(beige) / beige.size >= 0.70:
+            beige_cards += 1
+    return beige_cards >= 5
+
+
 def detect_anti_bot_odd_cards(screen):
     """
-    Return 0-based indices of the 2 cards that differ from the majority 4.
+    Return likely sliding-card indices, most likely first.
 
-    Strategy:
-      1. Crop each card region.
-      2. Build a pairwise HSV-histogram similarity matrix (6x6).
-      3. For each card, compute its average similarity to all others.
-      4. The 2 cards with the lowest average similarity are the odd ones.
+    The running sprite is narrow/upright, while the sliding sprite is wide,
+    low, and concentrated in the lower half. Measuring that foreground shape
+    is more reliable than correlating the whole card, whose border/background
+    previously made normal bottom-row cards look different.
     """
 
     # Define card coordinates based on config constants
@@ -187,29 +226,30 @@ def detect_anti_bot_odd_cards(screen):
         ANTI_BOT_CARD_POS_6,
     ]
 
-    # Crop card regions as grayscale for structural comparison
     screen_bgr = _normalize(screen)
-    crops = []
+    if screen_bgr is None:
+        return []
+    scores = []
     for cx, cy in card_coords:
-        crop = screen_bgr[cy:cy + ANTI_BOT_CARD_HEIGHT, cx:cx + ANTI_BOT_CARD_WIDTH]
-        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-        crops.append(gray)
+        inner = screen_bgr[
+            cy + 20:cy + ANTI_BOT_CARD_HEIGHT - 20,
+            cx + 20:cx + ANTI_BOT_CARD_WIDTH - 20,
+        ]
+        hsv = cv2.cvtColor(inner, cv2.COLOR_BGR2HSV)
+        foreground = cv2.inRange(hsv, (0, 80, 30), (179, 255, 255))
+        ys, xs = np.where(foreground > 0)
+        if len(xs) < 50:
+            scores.append(float("-inf"))
+            continue
+        width = float(xs.max() - xs.min() + 1)
+        height = float(ys.max() - ys.min() + 1)
+        aspect = width / max(1.0, height)
+        centroid_y = float(ys.mean()) / inner.shape[0]
+        lower_ratio = float((ys > inner.shape[0] * 0.5).mean())
+        scores.append((aspect * 2.0) + centroid_y + lower_ratio)
 
-    # Pairwise structural similarity via normalized cross-correlation
-    n = len(crops)
-    sim = np.zeros((n, n), dtype=np.float32)
-    for i in range(n):
-        for j in range(n):
-            if i != j:
-                result = cv2.matchTemplate(crops[i], crops[j], cv2.TM_CCOEFF_NORMED)
-                sim[i][j] = result[0][0]
-
-    # Average similarity of each card against all others (excluding self)
-    avg_sim = sim.sum(axis=1) / (n - 1)
-    print("🔍 Analyzing card similarity...")
-    for idx, s in enumerate(avg_sim):
-        print(f"  Card {idx + 1}: similarity score {s:.2f}")
-
-    # The 2 cards with the lowest average similarity are the odd ones
-    odd_indices = list(np.argsort(avg_sim)[:2])
-    return odd_indices
+    ranked = list(np.argsort(np.asarray(scores))[::-1])
+    print("🔍 Analyzing Anti-Bot card poses...")
+    for idx, score in enumerate(scores):
+        print(f"  Card {idx + 1}: slide score {score:.2f}")
+    return [int(index) for index in ranked[:2]]

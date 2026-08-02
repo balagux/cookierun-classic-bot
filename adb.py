@@ -171,8 +171,7 @@ def device_reset_app(ip: str, port: int, package: str = "com.devsisters.crg", ma
         stderr=subprocess.PIPE,
         text=True,
     )
-    print(f"⏳ Waiting 15 seconds for app {package} to stop...")
-    time.sleep(15)
+    time.sleep(1.0)
 
     for attempt in range(1, max_retries + 1):
         print(f"📱 Restarting app {package} on device at {ip}:{port} (attempt {attempt}/{max_retries})...")
@@ -182,26 +181,20 @@ def device_reset_app(ip: str, port: int, package: str = "com.devsisters.crg", ma
             stderr=subprocess.PIPE,
             text=True,
         )
-        print(f"⏳ Waiting 15 seconds to check if app started...")
-        time.sleep(15)
-
-        if device_is_app_running(ip, port, package):
-            print(f"📊 App {package} is running, verifying stability...")
-            stable = True
-            for check in range(1, 4):
-                time.sleep(20)
-                if not device_is_app_running(ip, port, package):
-                    print(f"💥 App {package} crashed during stability check ({check}/3).")
-                    stable = False
-                    break
-                print(f"✅ Stability check {check}/3 passed.")
-            if stable:
-                print(f"✅ App {package} is stable.")
-                return
+        deadline = time.monotonic() + 20.0
+        while time.monotonic() < deadline:
+            if device_is_app_running(ip, port, package):
+                print(f"📊 App {package} is running, verifying stability...")
+                time.sleep(3.0)
+                if device_is_app_running(ip, port, package):
+                    print(f"✅ App {package} is stable.")
+                    return
+                break
+            time.sleep(1.0)
 
         print(f"💥 App {package} appears to have crashed after launch.")
         if attempt < max_retries:
-            print(f"🔁 Retrying in 5 seconds...")
-            time.sleep(5)
+            print(f"🔁 Retrying in 2 seconds...")
+            time.sleep(2)
 
     raise Exception(f"❌ Failed to start {package} after {max_retries} attempts.")

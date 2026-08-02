@@ -26,9 +26,10 @@ from config import (
     CONFIRM_SEND_LIFE_BUTTON,
     CONFIRM_SEND_LIFE_REGION,
     CONFIRM_SEND_LIFE_TEMPLATE,
+    CONFIRM_QUIT_BUTTON,
+    CONFIRM_QUIT_BUTTON_REGION,
     COOKIE_RELAY_ITEM,
-    COOKIE_RELAY_ZERO_REGION,
-    COOKIE_RELAY_ZERO_TEMPLATE,
+    COOKIE_RELAY_STOCK_REGION,
     COOKIE_RELAY_USE_BUTTON,
     DEVICE_IP,
     DEVICE_PORT,
@@ -51,11 +52,13 @@ from config import (
     MULTI_PURCHASE_BUTTON,
     NO_LIVES_TO_RECEIVE_REGION,
     NO_LIVES_TO_RECEIVE_TEMPLATE,
-    NO_LIVES_TO_RECEIVE_TEMPLATE,
     PLAY_BUTTON,
     PAUSE_GAME_BUTTON,
+    PAUSE_QUIT_BUTTON_REGION,
     PURCHASE_BUTTON,
     QUIT_GAME_BUTTON,
+    QUIT_BUTTON_COLOR_RATIO,
+    QUIT_BUTTON_WAIT_TIMEOUT,
     QUICK_RECEIVE_AND_SEND_LIVES_BUTTON,
     RANDOM_BOOST_ITEM,
     RANDOM_BOOST_REGION,
@@ -82,7 +85,7 @@ from config import (
 def start_game():
     print("🏁 Starting the game...")
     safe_device_tap(DEVICE_IP, DEVICE_PORT, START_BUTTON[0], START_BUTTON[1])
-    time.sleep(random.uniform(0.8, 1.4))
+    time.sleep(random.uniform(0.45, 0.65))
 
 
 def play_game():
@@ -110,12 +113,32 @@ def purchase_cookie_relay():
     safe_device_tap(DEVICE_IP, DEVICE_PORT, COOKIE_RELAY_ITEM[0], COOKIE_RELAY_ITEM[1])
     time.sleep(random.uniform(0.8, 1.4))
     screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
-    if detect_templates(screen, COOKIE_RELAY_ZERO_TEMPLATE, COOKIE_RELAY_ZERO_REGION):
+    if not cookie_relay_has_stock(screen):
         print("🛒 Cookie Relay stock is 0 — purchasing one...")
         safe_device_tap(DEVICE_IP, DEVICE_PORT, PURCHASE_BUTTON[0], PURCHASE_BUTTON[1])
         time.sleep(random.uniform(1, 2))
     else:
         print("✅ Cookie Relay is already in stock — skipping purchase.")
+
+
+def cookie_relay_has_stock(screen):
+    """Return True when the shop tile shows a white stock quantity digit."""
+    if screen is None or not hasattr(screen, "shape"):
+        return False
+    x1, y1, x2, y2 = COOKIE_RELAY_STOCK_REGION
+    roi = screen[y1:y2, x1:x2]
+    if roi.size == 0:
+        return False
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    # Stock digits are bright white with a dark outline.  The zero-stock badge
+    # is grey, so its value stays below this threshold.
+    white = cv2.inRange(hsv, (0, 0, 180), (179, 105, 255))
+    component_count, _, stats, _ = cv2.connectedComponentsWithStats(white)
+    for index in range(1, component_count):
+        _, _, width, height, area = (int(value) for value in stats[index])
+        if 5 <= width <= 24 and 12 <= height <= 30 and 35 <= area <= 400:
+            return True
+    return False
 
 
 def purchase_random_boost():
@@ -208,6 +231,29 @@ def using_cookie_relay(wait_after=True):
         time.sleep(random.uniform(0.8, 1.2))
 
 
+def _is_cyan_quit_button_visible(screen, region):
+    if screen is None or not hasattr(screen, "shape"):
+        return False
+    x1, y1, x2, y2 = region
+    roi = screen[y1:y2, x1:x2]
+    if roi.size == 0:
+        return False
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    cyan_mask = cv2.inRange(hsv, (80, 100, 70), (105, 255, 255))
+    cyan_ratio = cv2.countNonZero(cyan_mask) / cyan_mask.size
+    return cyan_ratio >= QUIT_BUTTON_COLOR_RATIO
+
+
+def _wait_for_quit_button(region, timeout=QUIT_BUTTON_WAIT_TIMEOUT):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
+        if _is_cyan_quit_button_visible(screen, region):
+            return True
+        time.sleep(0.08)
+    return False
+
+
 def quick_exit_after_cookie_relay():
     """Wait for cookie two to run out, then leave through Pause -> Quit."""
     print("🏃 Waiting for the second cookie to run out...")
@@ -221,15 +267,29 @@ def quick_exit_after_cookie_relay():
     time.sleep(RELAY_QUICK_EXIT_RUNOUT_BUFFER)
     print("⏸️ Second cookie is running — opening Pause and quitting to Main Menu...")
     device_tap(DEVICE_IP, DEVICE_PORT, PAUSE_GAME_BUTTON[0], PAUSE_GAME_BUTTON[1])
-    time.sleep(0.22)
+    if not _wait_for_quit_button(PAUSE_QUIT_BUTTON_REGION):
+        print("⚠️ Pause menu was not ready — retrying Pause once.")
+        device_tap(DEVICE_IP, DEVICE_PORT, PAUSE_GAME_BUTTON[0], PAUSE_GAME_BUTTON[1])
+        if not _wait_for_quit_button(PAUSE_QUIT_BUTTON_REGION):
+            print("❌ Pause menu did not appear; quick-exit was cancelled safely.")
+            return False
     device_tap(DEVICE_IP, DEVICE_PORT, QUIT_GAME_BUTTON[0], QUIT_GAME_BUTTON[1])
-    time.sleep(0.35)
+    if not _wait_for_quit_button(CONFIRM_QUIT_BUTTON_REGION):
+        print("⚠️ Quit confirmation was not ready — retrying Quit once.")
+        device_tap(DEVICE_IP, DEVICE_PORT, QUIT_GAME_BUTTON[0], QUIT_GAME_BUTTON[1])
+        if not _wait_for_quit_button(CONFIRM_QUIT_BUTTON_REGION):
+            print("❌ Quit confirmation did not appear; quick-exit was cancelled safely.")
+            return False
+    device_tap(DEVICE_IP, DEVICE_PORT, CONFIRM_QUIT_BUTTON[0], CONFIRM_QUIT_BUTTON[1])
+    time.sleep(0.5)
+    return True
 
 
-def complete_finish():
+def complete_finish(wait_after=True):
     print("🏆 Completing the game...")
     safe_device_tap(DEVICE_IP, DEVICE_PORT, COMPLETE_FINISH_BUTTON[0], COMPLETE_FINISH_BUTTON[1])
-    time.sleep(random.uniform(0.8, 1.4))
+    if wait_after:
+        time.sleep(random.uniform(0.8, 1.4))
 
 
 def accept_mystery_box():
@@ -312,7 +372,7 @@ def accept_relic_claim():
     safe_device_tap(DEVICE_IP, DEVICE_PORT, RELIC_CLAIM_BUTTON[0], RELIC_CLAIM_BUTTON[1])
     time.sleep(random.uniform(0.8, 1.4))
     safe_device_tap(DEVICE_IP, DEVICE_PORT, RELIC_CLOSE_BUTTON[0], RELIC_CLOSE_BUTTON[1])
-    time.sleep(random.uniform(10, 15))
+    time.sleep(1.0)
 
 
 def handle_anti_bot(screen):
@@ -322,34 +382,39 @@ def handle_anti_bot(screen):
         ANTI_BOT_CARD_POS_4, ANTI_BOT_CARD_POS_5, ANTI_BOT_CARD_POS_6,
     ]
 
-    odd_indices = detect_anti_bot_odd_cards(screen)
-    card_nums = [i + 1 for i in odd_indices]
-    print(f"🃏 Found odd cards: Card {card_nums[0]} and Card {card_nums[1]}")
-
-    for idx in odd_indices:
+    current_screen = screen
+    for attempt in range(1, 4):
+        odd_indices = detect_anti_bot_odd_cards(current_screen)
+        if not odd_indices:
+            print("❌ Could not identify an Anti-Bot card.")
+            return False
+        idx = odd_indices[0]
         cx, cy = card_coords[idx]
-        # random tap position inside the card, with a small margin
-        margin = 20
-        tx = random.randint(cx + margin, cx + ANTI_BOT_CARD_WIDTH - margin)
-        ty = random.randint(cy + margin, cy + ANTI_BOT_CARD_HEIGHT - margin)
-        print(f"  👆 Tapping Card {idx + 1} at ({tx}, {ty})")
-        safe_device_tap(DEVICE_IP, DEVICE_PORT, tx, ty)
-        time.sleep(random.uniform(10, 15))
+        tx = cx + ANTI_BOT_CARD_WIDTH // 2
+        ty = cy + ANTI_BOT_CARD_HEIGHT // 2
+        print(f"  👆 Attempt {attempt}/3: tapping Card {idx + 1} at ({tx}, {ty})")
+        device_tap(DEVICE_IP, DEVICE_PORT, tx, ty)
+        time.sleep(0.35)
+        current_screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
+        if detect_stage(current_screen, ("ANTI_BOT",)) != "ANTI_BOT":
+            print("✅ Anti-Bot captcha solved!")
+            return True
+        print("🔄 Anti-Bot is still visible — recapturing and recalculating.")
 
-    print("✅ Anti-Bot captcha solved!")
-    time.sleep(random.uniform(0.8, 1.4))
+    print("❌ Anti-Bot was not solved after 3 attempts.")
+    return False
 
 
 def handle_connection_lost():
     print("🔌 Handling Connection Lost...")
     safe_device_tap(DEVICE_IP, DEVICE_PORT, CONNECTION_LOST_RELOAD_BUTTON[0], CONNECTION_LOST_RELOAD_BUTTON[1])
-    time.sleep(random.uniform(10, 15))
+    time.sleep(3.0)
 
 
 def handle_inactive():
     print("💤 Handling Inactive state...")
     safe_device_tap(DEVICE_IP, DEVICE_PORT, INACTIVE_RELOAD_BUTTON[0], INACTIVE_RELOAD_BUTTON[1])
-    time.sleep(random.uniform(10, 15))
+    time.sleep(3.0)
 
 
 def handle_send_friend_life():
