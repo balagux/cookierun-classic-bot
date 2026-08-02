@@ -4,7 +4,7 @@
 OpenCV ตรวจหน้าจอ และระบบ Record/Replay สำหรับบันทึกการกระโดดและสไลด์ พร้อม GUI ภาษาไทย
 แบบ Profile Gallery
 
-> เวอร์ชันปัจจุบัน: **1.3.3**
+> เวอร์ชันปัจจุบัน: **1.3.4**
 > โปรแกรมนี้เป็นโครงการทดลองสำหรับการเรียนรู้ระบบ Automation และ Computer Vision
 > การใช้งานกับบัญชีจริงอาจขัดกับข้อกำหนดของเกม ผู้ใช้ต้องรับผิดชอบความเสี่ยงด้วยตนเอง
 
@@ -27,6 +27,8 @@ OpenCV ตรวจหน้าจอ และระบบ Record/Replay สำ
 - ตรวจและกดปุ่ม Confirm อัตโนมัติจาก Main Loop โดยไม่เปิดตัวจับภาพ ADB ซ้ำระหว่าง Replay
 - OCR อ่าน Coins และ XP จากหน้า Result หลังตัวเลขและตัวคูณหยุดนับ
 - สรุปรอบที่เล่นสำเร็จ Coins/EXP รวม และค่าเฉลี่ยต่อรอบแบบเรียลไทม์
+- แสดงเวลาที่บอททำงานแบบ `ชั่วโมง:นาที:วินาที` และค้างเวลารวมไว้หลังหยุด
+- เมื่อกด START BOT ครั้งใหม่ จะรีเซ็ตจำนวนรอบ, Coins/EXP รวม และค่าเฉลี่ยเป็น session ใหม่
 - รับ Mystery Box, Level Up, Daily Reward, Relic และหน้ารางวัลหลังจบเกม
 - ตรวจ Anti-Bot ได้ทั้งโจทย์ jumping/sliding card, Connection Lost และ Inactive พร้อมกู้สถานะอัตโนมัติ
 - โปรไฟล์แสดงวันที่อัด เวลา อินพุต Coins/EXP จำนวนกระโดด/สไลด์ และรายละเอียดไฟล์ครบ
@@ -315,9 +317,9 @@ installer\CookieRunClassicBot-Setup.exe
 - Timing อาจต่างกันตามสเปกเครื่องและอาการ Lag ของ Emulator
 - โปรเจกต์ยังไม่ได้ระบุสัญญาอนุญาต (License) สำหรับการนำไปแจกจ่ายต่อ
 
-## ผลตรวจรุ่น 1.3.3
+## ผลตรวจรุ่น 1.3.4
 
-- Automated tests ผ่าน 19 รายการ: Record/Replay timing, Relay quick-exit, Anti-Bot, Stage/Template, OCR statistics และ app reset
+- Automated tests ผ่าน 20 รายการ: Record/Replay timing, Relay quick-exit, Anti-Bot, Stage/Template, OCR statistics, session timer/reset และ app reset
 - ทดสอบจริง 1 รอบที่ 1280×720 ผ่าน Main Menu → ตรวจ stock Cookie Relay → เลือก Double Coins → Replay → Relay → Pause/Quit/Confirm → Result OCR → Mystery Box → Main Menu
 - ผล OCR จากรอบทดสอบจริง: `101,055 Coins` และ `3,266 EXP` หลังรอค่าคงที่
 - หน้า Party Run มี handler แล้ว และกรอบ Too Many Treasures มีขนาดพอสำหรับ Template

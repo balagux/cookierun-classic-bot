@@ -430,7 +430,7 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
 
         session_summary = ctk.CTkFrame(profiles, fg_color="transparent")
         session_summary.pack(fill="x", padx=16, pady=(0, 9))
-        session_summary.grid_columnconfigure((0, 1, 2), weight=1, uniform="session_summary")
+        session_summary.grid_columnconfigure((0, 1, 2, 3), weight=1, uniform="session_summary")
         self._session_summary_tile(
             session_summary,
             0,
@@ -457,6 +457,15 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             self.session_exp_total_var,
             detail_var=self.session_exp_average_var,
             accent=("#FFEAF0", "#C74268"),
+        )
+        self._session_summary_tile(
+            session_summary,
+            3,
+            "clock",
+            "เวลาที่ใช้",
+            self.session_elapsed_var,
+            detail_var=self.session_elapsed_detail_var,
+            accent=("#EAF2FF", "#356FB6"),
         )
 
         self.profile_scroll = ctk.CTkScrollableFrame(
@@ -616,7 +625,7 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             row=0,
             column=column,
             sticky="nsew",
-            padx=(0 if column == 0 else 4, 0 if column == 2 else 4),
+            padx=(0 if column == 0 else 4, 0 if column == 3 else 4),
         )
         tile.grid_propagate(False)
         icon_box = ctk.CTkFrame(tile, width=40, height=40, corner_radius=11, fg_color=accent[0])

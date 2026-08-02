@@ -37,6 +37,8 @@ class CookieRunBotGUI:
         self.events = queue.Queue()
         self.connection_test_running = False
         self._last_profile_refresh = 0.0
+        self._session_started_at = None
+        self._session_last_elapsed_second = None
 
         self.ip_var = tk.StringVar(value=DEVICE_IP)
         self.port_var = tk.StringVar(value=str(DEVICE_PORT))
@@ -54,6 +56,8 @@ class CookieRunBotGUI:
         self.session_coins_average_var = tk.StringVar(value="เฉลี่ย 0 / รอบ")
         self.session_exp_total_var = tk.StringVar(value="0")
         self.session_exp_average_var = tk.StringVar(value="เฉลี่ย 0 / รอบ")
+        self.session_elapsed_var = tk.StringVar(value="00:00:00")
+        self.session_elapsed_detail_var = tk.StringVar(value="ยังไม่ได้เริ่ม")
 
         self._create_app_icon()
         self._configure_styles()
@@ -449,6 +453,7 @@ class CookieRunBotGUI:
         recordings = make_card(2)
         profile_header = add_header(recordings, "▣", "โปรไฟล์การเล่น", "บอทจะสุ่มหนึ่งโปรไฟล์ในแต่ละรอบ")
         ttk.Label(profile_header, textvariable=self.session_stats_var, style="Muted.TLabel").pack(side="right")
+        ttk.Label(profile_header, textvariable=self.session_elapsed_var, style="Count.TLabel").pack(side="right", padx=(0, 10))
         ttk.Label(profile_header, textvariable=self.profile_count_var, style="Count.TLabel").pack(side="right", padx=(0, 10))
         profile_content = tk.Frame(recordings, bg="#ffffff")
         profile_content.pack(fill="both", expand=True, padx=15, pady=(0, 8))
@@ -657,7 +662,7 @@ class CookieRunBotGUI:
         self._append_log("\n──────── เริ่มการทำงาน ────────\n")
         self.process_mode = mode
         if mode == "bot":
-            self._set_session_stats(0, 0, 0, 0)
+            self._begin_bot_session()
         self.stop_requested = False
         self._set_running_controls(True)
         self._set_status("กำลังอัดการเล่น" if mode == "record" else "บอทกำลังทำงาน", "running")
@@ -894,6 +899,7 @@ class CookieRunBotGUI:
                     process, return_code = payload
                     if process is self.process:
                         finished_mode = self.process_mode
+                        elapsed_text = self._finish_bot_session() if finished_mode == "bot" else None
                         self.process = None
                         self.process_mode = None
                         self._set_running_controls(False)
@@ -908,10 +914,16 @@ class CookieRunBotGUI:
                                     self._append_log("ไม่พบ touch event จึงไม่ได้สร้างโปรไฟล์\n")
                             else:
                                 self._set_status("หยุดแล้ว", "idle")
-                                self._append_log("──────── บอทหยุดทำงานแล้ว ────────\n")
+                                duration_note = f" • ใช้เวลา {elapsed_text}" if elapsed_text else ""
+                                self._append_log(
+                                    f"──────── บอทหยุดทำงานแล้ว{duration_note} ────────\n"
+                                )
                         else:
                             self._set_status("บอทหยุดด้วยข้อผิดพลาด", "error")
-                            self._append_log(f"──────── กระบวนการจบ (รหัส {return_code}) ────────\n")
+                            duration_note = f" • ใช้เวลา {elapsed_text}" if elapsed_text else ""
+                            self._append_log(
+                                f"──────── กระบวนการจบ (รหัส {return_code}){duration_note} ────────\n"
+                            )
                         self.stop_requested = False
                         self.record_target = None
                 elif event == "connection_result":
@@ -931,6 +943,8 @@ class CookieRunBotGUI:
         if self.process_mode == "record" and time.monotonic() - self._last_profile_refresh >= 1.0:
             self._refresh_profiles()
             self._last_profile_refresh = time.monotonic()
+        if self.process_mode == "bot":
+            self._update_session_elapsed()
         self.root.after(100, self._poll_events)
 
     def _set_running_controls(self, running):
@@ -981,6 +995,37 @@ class CookieRunBotGUI:
         self.session_coins_average_var.set(f"เฉลี่ย {average_coins} / รอบ")
         self.session_exp_total_var.set(f"{exp:,}")
         self.session_exp_average_var.set(f"เฉลี่ย {average_exp} / รอบ")
+
+    @staticmethod
+    def _format_session_elapsed(seconds):
+        total_seconds = max(0, int(seconds))
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+    def _begin_bot_session(self):
+        """Reset per-session rewards and start a fresh elapsed-time clock."""
+        self._set_session_stats(0, 0, 0, 0)
+        self._session_started_at = time.monotonic()
+        self._session_last_elapsed_second = 0
+        self.session_elapsed_var.set("00:00:00")
+        self.session_elapsed_detail_var.set("กำลังทำงาน")
+
+    def _update_session_elapsed(self, force=False):
+        if self._session_started_at is None:
+            return self.session_elapsed_var.get()
+        elapsed_seconds = max(0, int(time.monotonic() - self._session_started_at))
+        if force or elapsed_seconds != self._session_last_elapsed_second:
+            self._session_last_elapsed_second = elapsed_seconds
+            self.session_elapsed_var.set(self._format_session_elapsed(elapsed_seconds))
+        return self.session_elapsed_var.get()
+
+    def _finish_bot_session(self):
+        elapsed_text = self._update_session_elapsed(force=True)
+        self._session_started_at = None
+        self._session_last_elapsed_second = None
+        self.session_elapsed_detail_var.set("เวลารวมหลังหยุด")
+        return elapsed_text
 
     def _set_status(self, text, state):
         colors = {
