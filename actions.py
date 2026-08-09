@@ -90,14 +90,8 @@ def start_game():
 
 def play_game():
     print("🎮 Playing the game...")
-    dispatch_started_at = time.monotonic()
     safe_device_tap(DEVICE_IP, DEVICE_PORT, PLAY_BUTTON[0], PLAY_BUTTON[1])
-    dispatch_finished_at = time.monotonic()
-    timeline_started_at = (dispatch_started_at + dispatch_finished_at) / 2
-    # Record and replay use the moment Play was dispatched as the shared zero
-    # point. A long random wait here used to shift every replay by up to 600 ms.
     time.sleep(0.15)
-    return timeline_started_at
 
 
 def purchase_fast_start():

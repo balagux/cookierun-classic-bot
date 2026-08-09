@@ -1,7 +1,5 @@
 import random
-import threading
 import time
-from pathlib import Path
 
 import actions as actions_module
 from adb import device_capture_screen, device_connect, device_reset_app, device_tap
@@ -61,7 +59,6 @@ from config import (
 )
 from detection import detect_all_template_matches, detect_stage, load_templates
 from debug import save_debug_screen
-from macro import TouchRecorder, profile_summary, replay_profile, update_profile_metadata
 from result_ocr import read_result_rewards
 
 # -------------------
@@ -102,8 +99,8 @@ def get_detection_stage_names(group_name):
 
 
 def should_quick_exit_after_relay(options):
-    """Quick-exit only during automated replay, never while recording a profile."""
-    return bool(options.get("use_cookie_relay") and not options.get("record_profile"))
+    """Quick-exit whenever Cookie Relay automation is enabled."""
+    return bool(options.get("use_cookie_relay"))
 
 
 def prompt_user_options():
@@ -149,22 +146,16 @@ def configure_device(device_ip, device_port):
     actions_module.DEVICE_PORT = DEVICE_PORT
 
 
-def _replay_profile_safely(profile_path, stop_event=None, timeline_started_at=None):
-    try:
-        print(f"🎬 Replaying recorded run: {Path(profile_path).name}")
-        action_count = replay_profile(
-            DEVICE_IP,
-            DEVICE_PORT,
-            profile_path,
-            stop_event=stop_event,
-            timeline_started_at=timeline_started_at,
-        )
-        if stop_event is not None and stop_event.is_set():
-            print(f"⏹️ Replay cancelled cleanly after {action_count} touch actions.")
-        else:
-            print(f"✅ Replay completed ({action_count} touch actions).")
-    except Exception as exc:
-        print(f"❌ Replay failed: {exc}")
+def _reset_app_or_raise(failure_reason):
+    """Restart the game or fail the worker so the GUI reports an error."""
+    if device_reset_app(DEVICE_IP, DEVICE_PORT):
+        return
+    message = (
+        f"{failure_reason} The bot stopped safely; open Cookie Run in LDPlayer "
+        "and press Start again."
+    )
+    print(f"[BOT_STOPPED] {message}")
+    raise RuntimeError(message)
 
 
 def _dismiss_visible_confirm_buttons(screen, max_clicks=8, action_lock=None):
@@ -272,30 +263,6 @@ def _read_stable_result_rewards(
         screen = capture_func()
 
 
-def _save_profile_rewards(profile_path, coins, exp):
-    """Update fields OCR managed to read while preserving any missing value."""
-    if profile_path is None or (coins is None and exp is None):
-        return None
-    try:
-        summary = profile_summary(profile_path)
-        saved_coins = summary["coins"] if coins is None else coins
-        saved_exp = summary["exp"] if exp is None else exp
-        update_profile_metadata(
-            profile_path,
-            summary["name"],
-            saved_coins,
-            saved_exp,
-        )
-        print(
-            f"[PROFILE_REWARDS_UPDATED] {Path(profile_path).name} "
-            f"coins={saved_coins} exp={saved_exp}"
-        )
-        return {**summary, "coins": saved_coins, "exp": saved_exp}
-    except (OSError, ValueError, KeyError) as exc:
-        print(f"[OCR] Could not update profile rewards: {exc}")
-        return None
-
-
 def main(options=None, device_ip=None, device_port=None):
     if device_ip is not None or device_port is not None:
         configure_device(
@@ -303,7 +270,6 @@ def main(options=None, device_ip=None, device_port=None):
             DEVICE_PORT if device_port is None else device_port,
         )
 
-    recorder = None
     try:
         print("🚀 CookieRun Classic Bot Started")
         print("⚠️ Screen must be 1280x720 resolution for the bot to work properly.")
@@ -334,10 +300,7 @@ def main(options=None, device_ip=None, device_port=None):
         last_detected_time = time.time()
         session_start_time = time.time()
         session_reset_interval = random.uniform(*SESSION_RESET_INTERVAL)
-        recording_completed = False
-        game_macro_started = False
-        macro_thread = None
-        macro_stop_event = None
+        run_in_progress = False
         retry_interrupted_run = False
         relay_quick_exit_pending = False
         relay_quick_exit_rewards = {"coins": 0, "exp": 0}
@@ -345,8 +308,6 @@ def main(options=None, device_ip=None, device_port=None):
         completed_run_count = 0
         session_coins = 0
         session_exp = 0
-        current_profile_stats = {"coins": 0, "exp": 0}
-        current_profile_path = None
 
         while True:
             device_screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
@@ -376,12 +337,11 @@ def main(options=None, device_ip=None, device_port=None):
                 quick_exit_return = relay_quick_exit_pending
                 if quick_exit_return:
                     relay_quick_exit_pending = False
+                    run_in_progress = False
                     completed_run_count += 1
                     session_coins += int(relay_quick_exit_rewards.get("coins", 0))
                     session_exp += int(relay_quick_exit_rewards.get("exp", 0))
                     relay_quick_exit_rewards = {"coins": 0, "exp": 0}
-                    current_profile_path = None
-                    current_profile_stats = {"coins": 0, "exp": 0}
                     print("✅ Relay quick-exit round confirmed at Main Menu.")
                     print(
                         f"[STATS] attempts={session_run_count} completed={completed_run_count} "
@@ -389,24 +349,15 @@ def main(options=None, device_ip=None, device_port=None):
                     )
                 premature_return = (
                     not quick_exit_return
-                    and not options.get("record_profile")
                     and detection_group == "IN_GAME"
-                    and game_macro_started
+                    and run_in_progress
                 )
                 if premature_return:
                     print(
                         "⚠️ Returned to Main Menu before GAME_COMPLETE — "
-                        "cancelling the remaining replay and retrying this run."
+                        "retrying this run from the normal start sequence."
                     )
-                    if macro_stop_event is not None:
-                        macro_stop_event.set()
-                    if macro_thread is not None:
-                        macro_thread.join(timeout=5)
-                    macro_thread = None
-                    macro_stop_event = None
-                    game_macro_started = False
-                    current_profile_path = None
-                    current_profile_stats = {"coins": 0, "exp": 0}
+                    run_in_progress = False
                     session_run_count = max(completed_run_count, session_run_count - 1)
                     retry_interrupted_run = True
                     detection_group = "PRE_GAME"
@@ -418,26 +369,9 @@ def main(options=None, device_ip=None, device_port=None):
                 refresh_wait = 0.5 if quick_exit_return else 1.0
                 print(f"⏳ Waiting {refresh_wait:.0f} seconds for screen refresh...")
                 time.sleep(refresh_wait)
-                if recorder is not None and options.get("record_profile"):
-                    record_path = Path(options["record_profile"])
-                    action_count = recorder.stop_and_save(record_path)
-                    recorder = None
-                    recording_completed = True
-                    if action_count:
-                        print(
-                            f"💾 Saved partial recording {record_path.name} "
-                            f"after Pause/Quit ({action_count} actions)."
-                        )
-                    else:
-                        record_path.unlink(missing_ok=True)
-                        print("⚠️ No input was captured; partial recording was not saved.")
-                if recording_completed:
-                    print("✅ Recording run finished. Returning control to the GUI.")
-                    return
                 max_runs = int(options.get("max_runs", 0) or 0)
                 if (
-                    not options.get("record_profile")
-                    and max_runs > 0
+                    max_runs > 0
                     and session_run_count >= max_runs
                 ):
                     print(
@@ -448,11 +382,12 @@ def main(options=None, device_ip=None, device_port=None):
                 elapsed = time.time() - session_start_time
                 if elapsed >= session_reset_interval:
                     print(f"🔄 Session reset triggered after {elapsed / 3600:.2f}h — restarting app...")
-                    device_reset_app(DEVICE_IP, DEVICE_PORT)
+                    _reset_app_or_raise("The game could not be restarted.")
                     close_announcement_dialog()
                     session_start_time = time.time()
                     session_reset_interval = random.uniform(*SESSION_RESET_INTERVAL)
                     detection_group = "PRE_GAME"
+                    run_in_progress = False
                     last_stage = None
                     is_first_game = True
                     continue
@@ -476,55 +411,19 @@ def main(options=None, device_ip=None, device_port=None):
                 last_stage = None
             elif stage == "PURCHASE_ITEM":
                 print("🛒 Detected Stage: PURCHASE_ITEM")
-                if macro_stop_event is not None:
-                    macro_stop_event.set()
-                if macro_thread is not None:
-                    macro_thread.join(timeout=5)
-                macro_thread = None
-                macro_stop_event = None
-                game_macro_started = False
                 if options["use_fast_start"]:
                     purchase_fast_start()
                 if options["use_cookie_relay"]:
                     purchase_cookie_relay()
                 if options["use_desired_random_boost"]:
                     purchase_desired_random_boost(options["desired_boost_template"], options["desired_boost_name"])
-                run_timeline_started_at = play_game()
-                current_profile_stats = {"coins": 0, "exp": 0}
-                current_profile_path = None
-                if not options.get("record_profile"):
-                    session_run_count += 1
-                    print(
-                        f"[STATS] attempts={session_run_count} completed={completed_run_count} "
-                        f"coins={session_coins} exp={session_exp}"
-                    )
-                if not game_macro_started:
-                    game_macro_started = True
-                    record_path = options.get("record_profile")
-                    replay_profiles = options.get("replay_profiles") or []
-                    if record_path:
-                        recorder = TouchRecorder(
-                            DEVICE_IP,
-                            DEVICE_PORT,
-                            autosave_path=record_path,
-                            profile_name=options.get("profile_name"),
-                        )
-                        recorder.start(timeline_started_at=run_timeline_started_at)
-                        print("🔴 Recording started after Play — play this run yourself now.")
-                    elif replay_profiles:
-                        selected_profile = random.choice(replay_profiles)
-                        current_profile_path = selected_profile
-                        try:
-                            current_profile_stats = profile_summary(selected_profile)
-                        except (OSError, ValueError, KeyError):
-                            current_profile_stats = {"coins": 0, "exp": 0}
-                        macro_stop_event = threading.Event()
-                        macro_thread = threading.Thread(
-                            target=_replay_profile_safely,
-                            args=(selected_profile, macro_stop_event, run_timeline_started_at),
-                            daemon=True,
-                        )
-                        macro_thread.start()
+                play_game()
+                run_in_progress = True
+                session_run_count += 1
+                print(
+                    f"[STATS] attempts={session_run_count} completed={completed_run_count} "
+                    f"coins={session_coins} exp={session_exp}"
+                )
                 detection_group = "IN_GAME"
                 time.sleep(0.2)
                 last_stage = None
@@ -539,13 +438,6 @@ def main(options=None, device_ip=None, device_port=None):
                 if options["use_cookie_relay"]:
                     quick_exit_enabled = should_quick_exit_after_relay(options)
                     if quick_exit_enabled:
-                        if macro_stop_event is not None:
-                            macro_stop_event.set()
-                        if macro_thread is not None:
-                            macro_thread.join(timeout=5)
-                        macro_thread = None
-                        macro_stop_event = None
-                        game_macro_started = False
                         using_cookie_relay(wait_after=False)
                         relay_quick_exit_pending = quick_exit_after_cookie_relay()
                         last_stage = None
@@ -555,12 +447,6 @@ def main(options=None, device_ip=None, device_port=None):
                 last_stage = None
             elif stage == "GAME_COMPLETE":
                 if relay_quick_exit_pending:
-                    if macro_stop_event is not None:
-                        macro_stop_event.set()
-                    if macro_thread is not None:
-                        macro_thread.join(timeout=5)
-                    macro_thread = None
-                    macro_stop_event = None
                     try:
                         (
                             result_coins,
@@ -582,33 +468,11 @@ def main(options=None, device_ip=None, device_port=None):
                         "coins": result_coins,
                         "exp": result_exp,
                     }
-                    _save_profile_rewards(
-                        current_profile_path,
-                        result_coins if result_coins > 0 else None,
-                        result_exp if result_exp > 0 else None,
-                    )
                     complete_finish(wait_after=False)
-                    game_macro_started = False
+                    run_in_progress = False
                     detection_group = "POST_GAME"
                     last_stage = None
                     continue
-                if macro_stop_event is not None:
-                    macro_stop_event.set()
-                if macro_thread is not None:
-                    macro_thread.join(timeout=5)
-                macro_thread = None
-                macro_stop_event = None
-                finished_record_path = None
-                finished_record_action_count = None
-                if recorder is not None:
-                    # Stop timing immediately when Result appears. OCR may wait for
-                    # count-up animations and must not extend the recorded profile.
-                    finished_record_path = Path(options["record_profile"])
-                    finished_record_action_count = recorder.stop_and_save(
-                        finished_record_path
-                    )
-                    recorder = None
-                    recording_completed = True
                 result_coins = None
                 result_exp = None
                 try:
@@ -627,56 +491,24 @@ def main(options=None, device_ip=None, device_port=None):
                             f"(raw coins={coin_detail}, raw exp={exp_detail})"
                         )
                         if result_coins is None or result_exp is None:
-                            print("[OCR] One reward value was unreadable; its existing value was kept.")
+                            print("[OCR] One reward value was unreadable; only the readable value will be counted.")
                             save_debug_screen(device_screen)
                     else:
-                        print("[OCR] Could not read Coins or XP; existing profile values were kept.")
+                        print("[OCR] Could not read Coins or XP; this run will add zero to the unreadable totals.")
                         save_debug_screen(device_screen)
                 except Exception as exc:
-                    print(f"[OCR] Reward reading failed; existing values were kept: {exc}")
+                    print(f"[OCR] Reward reading failed; this run will add zero: {exc}")
                     save_debug_screen(device_screen)
                 print("✅ Detected Stage: GAME_COMPLETE")
-                if finished_record_path is not None:
-                    if finished_record_action_count:
-                        _save_profile_rewards(
-                            finished_record_path,
-                            result_coins,
-                            result_exp,
-                        )
-                        print(
-                            f"💾 Saved recording {finished_record_path.name} "
-                            f"({finished_record_action_count} touch actions)."
-                        )
-                    else:
-                        finished_record_path.unlink(missing_ok=True)
-                        print("⚠️ No touch actions were captured; recording was not saved.")
-                elif not options.get("record_profile"):
-                    completed_run_count += 1
-                    updated_stats = _save_profile_rewards(
-                        current_profile_path,
-                        result_coins,
-                        result_exp,
-                    )
-                    if updated_stats is not None:
-                        current_profile_stats = updated_stats
-                    run_coins = (
-                        result_coins
-                        if result_coins is not None
-                        else int(current_profile_stats.get("coins", 0))
-                    )
-                    run_exp = (
-                        result_exp
-                        if result_exp is not None
-                        else int(current_profile_stats.get("exp", 0))
-                    )
-                    session_coins += int(run_coins)
-                    session_exp += int(run_exp)
-                    print(
-                        f"[STATS] attempts={session_run_count} completed={completed_run_count} "
-                        f"coins={session_coins} exp={session_exp}"
-                    )
+                completed_run_count += 1
+                session_coins += int(result_coins or 0)
+                session_exp += int(result_exp or 0)
+                print(
+                    f"[STATS] attempts={session_run_count} completed={completed_run_count} "
+                    f"coins={session_coins} exp={session_exp}"
+                )
                 complete_finish()
-                game_macro_started = False
+                run_in_progress = False
                 detection_group = "POST_GAME"
                 last_stage = None
             elif stage == "MYSTERY_BOX":
@@ -761,11 +593,12 @@ def main(options=None, device_ip=None, device_port=None):
                 last_stage = None
             elif stage == "CONNECTION_LOST":
                 print("🔌 Detected Stage: CONNECTION_LOST")
-                device_reset_app(DEVICE_IP, DEVICE_PORT)
+                _reset_app_or_raise("Connection recovery could not restart the game.")
                 close_announcement_dialog()
                 session_start_time = time.time()
                 session_reset_interval = random.uniform(*SESSION_RESET_INTERVAL)
                 detection_group = "PRE_GAME"
+                run_in_progress = False
                 last_stage = None
                 is_first_game = True
             elif stage == "INACTIVE":
@@ -778,10 +611,3 @@ def main(options=None, device_ip=None, device_port=None):
     except Exception as e:
         print(f"❌ An error occurred: {e}")
         raise
-    finally:
-        if "macro_stop_event" in locals() and macro_stop_event is not None:
-            macro_stop_event.set()
-        if "macro_thread" in locals() and macro_thread is not None:
-            macro_thread.join(timeout=5)
-        if recorder is not None:
-            recorder.stop()

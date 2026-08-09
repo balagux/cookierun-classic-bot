@@ -1,12 +1,8 @@
-from functools import partial
-from datetime import datetime
-
 import customtkinter as ctk
 from PIL import Image, ImageDraw, ImageTk
 
 from bot import BOOST_CHOICES
 from gui import CookieRunBotGUI
-from macro import list_profiles, profile_summary
 
 
 BG = "#F4F5FA"
@@ -18,8 +14,6 @@ MUTED = "#858A9E"
 PURPLE = "#6C5CE7"
 PURPLE_HOVER = "#7A6BED"
 PURPLE_SOFT = "#F0EDFF"
-PINK = "#FF5C86"
-PINK_HOVER = "#ED4A75"
 BORDER = "#E9EAF1"
 
 
@@ -57,17 +51,19 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         # 125–150% enlargement on high-DPI Windows laptops.
         logical_screen_width = max(1, int(screen_width / window_scaling))
         logical_screen_height = max(1, int(screen_height / window_scaling))
+        # Keep the controller deliberately small so it can sit beside LDPlayer
+        # even on a laptop display. The main pane scrolls when space is tight.
         window_width = min(
             logical_screen_width,
-            max(640, min(1380, logical_screen_width - 32)),
+            max(600, min(720, logical_screen_width - 24)),
         )
         window_height = min(
             logical_screen_height,
-            max(320, min(900, logical_screen_height - 112)),
+            max(420, min(500, logical_screen_height - 80)),
         )
-        compact = window_width < 1280 or window_height < 820
-        sidebar_width = 238 if not compact else (218 if window_width >= 960 else 196)
-        sidebar_scrollbar_width = 16 if compact else 0
+        compact = True
+        sidebar_width = 180 if window_width >= 700 else 168
+        sidebar_scrollbar_width = 16
         content_width = max(1, window_width - sidebar_width - sidebar_scrollbar_width)
         scaled_window_width = round(window_width * window_scaling)
         scaled_window_height = round(window_height * window_scaling)
@@ -87,10 +83,10 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             "sidebar_width": sidebar_width,
             "sidebar_outer_width": sidebar_width + sidebar_scrollbar_width,
             "content_width": content_width,
-            "stack_settings": content_width < 980,
-            "summary_columns": 2 if content_width < 980 else 4,
-            "profile_columns": 1 if content_width < 980 else 2,
-            "metric_columns": 2 if content_width < 700 else 4,
+            "narrow_controls": content_width < 500,
+            "boost_combo_row": 3 if content_width < 500 else 1,
+            "stack_settings": True,
+            "summary_columns": 2,
         }
 
     def _configure_styles(self):
@@ -106,30 +102,13 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         self.compact_layout = self.layout["compact"]
         self.sidebar_width = self.layout["sidebar_width"]
         self.summary_columns = self.layout["summary_columns"]
-        self.profile_grid_columns = self.layout["profile_columns"]
-        self.profile_metric_columns = self.layout["metric_columns"]
+        self.narrow_controls = self.layout["narrow_controls"]
         self.root.geometry(
             f'{self.layout["width"]}x{self.layout["height"]}'
             f'+{self.layout["x"]}+{self.layout["y"]}'
         )
-        if self.compact_layout:
-            required_content_width = 550
-            if self.profile_metric_columns == 4:
-                required_content_width = max(required_content_width, 700)
-            if (
-                not self.layout["stack_settings"]
-                or self.summary_columns == 4
-                or self.profile_grid_columns == 2
-            ):
-                required_content_width = max(required_content_width, 980)
-            minimum_width = min(
-                self.layout["width"],
-                self.layout["sidebar_outer_width"] + required_content_width,
-            )
-            minimum_height = min(600, self.layout["height"])
-        else:
-            minimum_width = 1280
-            minimum_height = 820
+        minimum_width = min(660, self.layout["width"])
+        minimum_height = min(430, self.layout["height"])
         self.root.minsize(minimum_width, minimum_height)
         self.root.configure(fg_color=BG)
 
@@ -151,20 +130,9 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             draw.polygon(((p(21), p(13)), (p(52), p(32)), (p(21), p(51))), fill=color)
         elif name == "stop":
             draw.rounded_rectangle((p(17), p(17), p(47), p(47)), radius=p(5), fill=color)
-        elif name == "record":
-            draw.ellipse((p(14), p(14), p(50), p(50)), fill=color)
-            draw.ellipse((p(23), p(23), p(41), p(41)), fill="#FFFFFF")
         elif name == "refresh":
             draw.arc((p(12), p(12), p(52), p(52)), 35, 300, fill=color, width=width)
             draw.polygon(((p(46), p(9)), (p(55), p(22)), (p(40), p(23))), fill=color)
-        elif name == "edit":
-            draw.line((p(16), p(47), p(45), p(18)), fill=color, width=p(8))
-            draw.polygon(((p(12), p(52)), (p(18), p(38)), (p(27), p(47))), fill=color)
-            draw.line((p(40), p(14), p(49), p(23)), fill=color, width=p(8))
-        elif name == "trash":
-            draw.rounded_rectangle((p(18), p(20), p(46), p(52)), radius=p(4), outline=color, width=width)
-            draw.line((p(14), p(16), p(50), p(16)), fill=color, width=width)
-            draw.line((p(25), p(10), p(39), p(10)), fill=color, width=width)
         elif name == "plug":
             draw.line((p(20), p(12), p(20), p(24)), fill=color, width=width)
             draw.line((p(44), p(12), p(44), p(24)), fill=color, width=width)
@@ -173,11 +141,6 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         elif name == "sparkle":
             draw.polygon(((p(32), p(7)), (p(38), p(25)), (p(56), p(32)), (p(38), p(39)),
                           (p(32), p(57)), (p(26), p(39)), (p(8), p(32)), (p(26), p(25))), fill=color)
-        elif name == "profiles":
-            draw.rounded_rectangle((p(10), p(15), p(47), p(48)), radius=p(5), outline=color, width=width)
-            draw.rounded_rectangle((p(19), p(8), p(54), p(41)), radius=p(5), outline=color, width=width)
-            draw.line((p(18), p(27), p(39), p(27)), fill=color, width=width)
-            draw.line((p(18), p(37), p(34), p(37)), fill=color, width=width)
         elif name == "activity":
             draw.rounded_rectangle((p(10), p(10), p(54), p(54)), radius=p(8), outline=color, width=width)
             draw.line((p(17), p(25), p(47), p(25)), fill=color, width=width)
@@ -215,13 +178,9 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             "cookie": ("cookie", "#FFFFFF", 30),
             "play": ("play", "#FFFFFF", 18),
             "stop": ("stop", "#FF8BA6", 16),
-            "record": ("record", "#FFFFFF", 17),
             "refresh": ("refresh", "#5D6277", 16),
-            "edit": ("edit", "#6252CC", 16),
-            "trash": ("trash", "#D84D6E", 16),
             "plug": ("plug", PURPLE, 18),
             "sparkle": ("sparkle", "#F2A93B", 18),
-            "profiles": ("profiles", PINK, 18),
             "activity": ("activity", "#4EA4C8", 18),
             "check": ("check", "#FFFFFF", 14),
             "clock": ("clock", "#6C5CE7", 16),
@@ -300,9 +259,7 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             sidebar.grid_propagate(False)
             sidebar.grid_rowconfigure(6, weight=1)
 
-        quick_row = 2 if self.compact_layout else 1
-        steps_row = 3 if self.compact_layout else 2
-        run_row = 1 if self.compact_layout else 3
+        run_row = 1
 
         brand = ctk.CTkFrame(sidebar, fg_color="transparent")
         brand.grid(
@@ -310,7 +267,7 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             column=0,
             sticky="ew",
             padx=12 if self.compact_layout else 20,
-            pady=(12, 12) if self.compact_layout else (22, 28),
+            pady=(12, 10),
         )
         brand_icon_size = 42 if self.compact_layout else 50
         cookie_box = ctk.CTkFrame(
@@ -333,45 +290,13 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             font=self._font(9, "bold"),
         ).pack(anchor="w")
 
-        ctk.CTkLabel(sidebar, text="QUICK START", text_color="#666B84", font=self._font(10, "bold"), anchor="w").grid(
-            row=quick_row,
-            column=0,
-            sticky="ew",
-            padx=18 if self.compact_layout else 22,
-            pady=(16, 8) if self.compact_layout else (0, 8),
-        )
-        steps = ctk.CTkFrame(sidebar, fg_color="transparent")
-        steps.grid(row=steps_row, column=0, sticky="ew", padx=12 if self.compact_layout else 15)
-        for index, (number, title, note) in enumerate((
-            ("01", "เชื่อมต่อ ADB", "ตรวจหา Emulator"),
-            ("02", "อัดการเล่น", "สร้างโปรไฟล์ใหม่"),
-            ("03", "เริ่มบอท", "เล่นซ้ำอัตโนมัติ"),
-        )):
-            step = ctk.CTkFrame(steps, height=53, corner_radius=12, fg_color="#1C1F35")
-            step.pack(fill="x", pady=4)
-            step.pack_propagate(False)
-            ctk.CTkLabel(
-                step,
-                text=number,
-                width=34,
-                height=30,
-                corner_radius=9,
-                fg_color="#292D49",
-                text_color="#9B90EF",
-                font=self._font(10, "bold"),
-            ).pack(side="left", padx=(10, 9))
-            copy = ctk.CTkFrame(step, fg_color="transparent")
-            copy.pack(side="left")
-            ctk.CTkLabel(copy, text=title, text_color="#EEF0F8", font=self._font(11, "bold"), anchor="w").pack(anchor="w")
-            ctk.CTkLabel(copy, text=note, text_color="#777C95", font=self._font(9), anchor="w").pack(anchor="w")
-
         run_panel = ctk.CTkFrame(sidebar, corner_radius=16, fg_color=SIDEBAR_CARD)
         run_panel.grid(
             row=run_row,
             column=0,
             sticky="ew",
             padx=12 if self.compact_layout else 15,
-            pady=(4, 0) if self.compact_layout else (24, 0),
+            pady=(6, 0),
         )
         ctk.CTkLabel(run_panel, text="RUN CONTROL", text_color="#858AA2", font=self._font(10, "bold"), anchor="w").pack(
             fill="x", padx=14, pady=(14, 9)
@@ -405,7 +330,7 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         repeat = ctk.CTkFrame(run_panel, fg_color="transparent")
         repeat.pack(fill="x", padx=13)
         ctk.CTkLabel(repeat, text="จำนวนรอบ", text_color="#C1C4D3", font=self._font(10)).pack(side="left")
-        self.replay_count_spinbox = ctk.CTkEntry(
+        self.max_runs_spinbox = ctk.CTkEntry(
             repeat,
             width=62,
             height=34,
@@ -415,42 +340,31 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             fg_color="#292C47",
             text_color="#FFFFFF",
             justify="center",
-            textvariable=self.replay_count_var,
+            textvariable=self.max_runs_var,
         )
-        self.replay_count_spinbox.pack(side="right")
+        self.max_runs_spinbox.pack(side="right")
         ctk.CTkLabel(run_panel, text="0 = เล่นไม่จำกัด", text_color="#737891", font=self._font(9), anchor="w").pack(
             fill="x", padx=14, pady=(7, 14)
         )
-
-        shortcut = ctk.CTkFrame(sidebar, corner_radius=12, fg_color="#1B1E33")
-        shortcut.grid(row=5, column=0, sticky="sew", padx=15, pady=(12, 17))
-        if self.compact_layout:
-            ctk.CTkLabel(
-                shortcut,
-                text="W  กระโดด    •    S  สไลด์",
-                text_color="#AEB2C6",
-                font=self._font(9, "bold"),
-            ).pack(fill="x", padx=9, pady=10)
-        else:
-            ctk.CTkLabel(shortcut, text="W", width=30, height=28, corner_radius=8, fg_color="#2A2D48", text_color="#FFFFFF", font=self._font(10, "bold")).pack(side="left", padx=(10, 6), pady=10)
-            ctk.CTkLabel(shortcut, text="กระโดด", text_color="#8B90A8", font=self._font(9)).pack(side="left")
-            ctk.CTkLabel(shortcut, text="S", width=30, height=28, corner_radius=8, fg_color="#2A2D48", text_color="#FFFFFF", font=self._font(10, "bold")).pack(side="left", padx=(12, 6), pady=10)
-            ctk.CTkLabel(shortcut, text="สไลด์", text_color="#8B90A8", font=self._font(9)).pack(side="left")
 
         workspace = ctk.CTkFrame(self.root, corner_radius=0, fg_color=BG)
         workspace.grid(row=0, column=1, sticky="nsew")
         workspace.grid_columnconfigure(0, weight=1)
         workspace.grid_rowconfigure(1, weight=1)
 
-        topbar = ctk.CTkFrame(workspace, height=74, corner_radius=0, fg_color=CARD)
+        topbar = ctk.CTkFrame(workspace, height=60, corner_radius=0, fg_color=CARD)
         topbar.grid(row=0, column=0, sticky="ew")
         topbar.grid_propagate(False)
         title_copy = ctk.CTkFrame(topbar, fg_color="transparent")
-        title_copy.pack(side="left", padx=21, pady=12)
-        ctk.CTkLabel(title_copy, text="Automation Studio", text_color=TEXT, font=self._font(20, "bold"), anchor="w").pack(anchor="w")
+        title_copy.pack(side="left", padx=18, pady=8)
+        ctk.CTkLabel(title_copy, text="CookieRun Bot", text_color=TEXT, font=self._font(17, "bold"), anchor="w").pack(anchor="w")
         ctk.CTkLabel(
             title_copy,
-            text="จัดการบอท Record และ Replay ในหน้าจอเดียว",
+            text=(
+                "ซื้อไอเทม • Start / Stop"
+                if self.narrow_controls
+                else "ตั้งค่าการซื้อไอเทม แล้วเริ่มบอทได้ทันที"
+            ),
             text_color=MUTED,
             font=self._font(10),
             anchor="w",
@@ -465,7 +379,7 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             font=self._font(10, "bold"),
             padx=13,
         )
-        self.status_label.pack(side="right", padx=20)
+        self.status_label.pack(side="right", padx=16)
 
         if self.compact_layout:
             body = ctk.CTkScrollableFrame(
@@ -482,8 +396,7 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             body.grid(row=1, column=0, sticky="nsew", padx=17, pady=13)
         body.grid_columnconfigure(0, weight=1)
         if not self.compact_layout:
-            body.grid_rowconfigure(1, weight=1, minsize=330)
-            body.grid_rowconfigure(2, weight=0, minsize=155)
+            body.grid_rowconfigure(3, weight=1, minsize=150)
 
         settings_row = ctk.CTkFrame(body, fg_color="transparent")
         settings_row.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
@@ -505,18 +418,16 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         fields = ctk.CTkFrame(connection, fg_color="transparent")
         fields.pack(fill="x", padx=16, pady=(0, 13))
         fields.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(fields, text="IP / HOST", text_color=MUTED, font=self._font(9, "bold")).grid(row=0, column=0, padx=(0, 8))
+        ip_label = ctk.CTkLabel(fields, text="IP / HOST", text_color=MUTED, font=self._font(9, "bold"))
         self.ip_entry = ctk.CTkEntry(
             fields, height=36, corner_radius=10, border_width=1, border_color=BORDER,
             fg_color="#F8F8FC", text_color=TEXT, textvariable=self.ip_var,
         )
-        self.ip_entry.grid(row=0, column=1, sticky="ew", padx=(0, 13))
-        ctk.CTkLabel(fields, text="PORT", text_color=MUTED, font=self._font(9, "bold")).grid(row=0, column=2, padx=(0, 8))
+        port_label = ctk.CTkLabel(fields, text="PORT", text_color=MUTED, font=self._font(9, "bold"))
         self.port_entry = ctk.CTkEntry(
             fields, width=82, height=36, corner_radius=10, border_width=1, border_color=BORDER,
             fg_color="#F8F8FC", text_color=TEXT, textvariable=self.port_var,
         )
-        self.port_entry.grid(row=0, column=3, padx=(0, 13))
         self.test_button = ctk.CTkButton(
             fields,
             width=130,
@@ -530,7 +441,18 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             font=self._font(10, "bold"),
             command=self._test_connection,
         )
-        self.test_button.grid(row=0, column=4)
+        if self.narrow_controls:
+            ip_label.grid(row=0, column=0, sticky="w", padx=(0, 8), pady=(0, 7))
+            self.ip_entry.grid(row=0, column=1, sticky="ew", pady=(0, 7))
+            port_label.grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(0, 7))
+            self.port_entry.grid(row=1, column=1, sticky="ew", pady=(0, 7))
+            self.test_button.grid(row=2, column=0, columnspan=2, sticky="ew")
+        else:
+            ip_label.grid(row=0, column=0, padx=(0, 8))
+            self.ip_entry.grid(row=0, column=1, sticky="ew", padx=(0, 13))
+            port_label.grid(row=0, column=2, padx=(0, 8))
+            self.port_entry.grid(row=0, column=3, padx=(0, 13))
+            self.test_button.grid(row=0, column=4)
 
         options = ctk.CTkFrame(
             settings_row, corner_radius=16, fg_color=CARD, border_width=1, border_color=BORDER,
@@ -556,15 +478,33 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             text_color="#464A5E",
             font=self._font(10),
         )
-        ctk.CTkSwitch(option_row, text="Fast Start", variable=self.fast_start_var, **switch_args).grid(row=0, column=0, sticky="w", padx=(0, 8))
-        ctk.CTkSwitch(option_row, text="Cookie Relay", variable=self.cookie_relay_var, **switch_args).grid(row=0, column=1, sticky="w", padx=(0, 8))
-        ctk.CTkSwitch(
+        fast_start_switch = ctk.CTkSwitch(
+            option_row,
+            text="Fast Start",
+            variable=self.fast_start_var,
+            **switch_args,
+        )
+        cookie_relay_switch = ctk.CTkSwitch(
+            option_row,
+            text="Cookie Relay",
+            variable=self.cookie_relay_var,
+            **switch_args,
+        )
+        random_boost_switch = ctk.CTkSwitch(
             option_row,
             text="Random Boost",
             variable=self.use_boost_var,
             command=self._toggle_boost,
             **switch_args,
-        ).grid(row=0, column=2, sticky="w")
+        )
+        if self.narrow_controls:
+            fast_start_switch.grid(row=0, column=0, columnspan=3, sticky="w")
+            cookie_relay_switch.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
+            random_boost_switch.grid(row=2, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        else:
+            fast_start_switch.grid(row=0, column=0, sticky="w", padx=(0, 8))
+            cookie_relay_switch.grid(row=0, column=1, sticky="w", padx=(0, 8))
+            random_boost_switch.grid(row=0, column=2, sticky="w")
         self.boost_combo = BoostOptionMenu(
             option_row,
             height=36,
@@ -580,24 +520,23 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             font=self._font(10),
             dropdown_font=self._font(10),
         )
-        self.boost_combo.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(9, 0))
+        self.boost_combo.grid(
+            row=self.layout["boost_combo_row"],
+            column=0,
+            columnspan=3,
+            sticky="ew",
+            pady=(9, 0),
+        )
         self.boost_combo.current(0)
 
-        profiles = self._card(body, 1)
-        profile_header = self._section_header(profiles, "profiles", "โปรไฟล์การเล่น", "เลือกเพื่อแก้ไข หรือลบโปรไฟล์")
-        self.profile_count_label = ctk.CTkLabel(
-            profile_header,
-            textvariable=self.profile_count_var,
-            height=28,
-            corner_radius=9,
-            fg_color=PURPLE_SOFT,
-            text_color="#5D4BC3",
-            font=self._font(9, "bold"),
-            padx=10,
+        statistics = self._card(body, 1)
+        self._section_header(
+            statistics,
+            "activity",
+            "สถิติการเล่นรอบปัจจุบัน",
+            "Coins และ EXP หลังตัวคูณหยุดแล้ว",
         )
-        self.profile_count_label.pack(side="right")
-
-        session_summary = ctk.CTkFrame(profiles, fg_color="transparent")
+        session_summary = ctk.CTkFrame(statistics, fg_color="transparent")
         session_summary.pack(fill="x", padx=16, pady=(0, 9))
         session_summary.grid_columnconfigure(
             tuple(range(self.summary_columns)),
@@ -641,93 +580,6 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             accent=("#EAF2FF", "#356FB6"),
         )
 
-        self.profile_scroll = ctk.CTkScrollableFrame(
-            profiles,
-            height=218,
-            corner_radius=14,
-            fg_color="#F7F8FC",
-            scrollbar_button_color="#D9DCE7",
-            scrollbar_button_hover_color="#C9CDD9",
-        )
-        self.profile_scroll.pack(fill="both", expand=True, padx=16, pady=(0, 6))
-        self.profile_scroll.grid_columnconfigure(
-            tuple(range(self.profile_grid_columns)),
-            weight=1,
-            uniform="profile_cards",
-        )
-        self.selected_profile_path = None
-        self.profile_rows = {}
-
-        profile_actions = ctk.CTkFrame(profiles, fg_color="transparent")
-        profile_actions.pack(fill="x", padx=16, pady=(3, 13))
-        narrow_profiles = self.profile_grid_columns == 1
-        action_controls = ctk.CTkFrame(profile_actions, fg_color="transparent")
-        if narrow_profiles:
-            action_controls.pack(fill="x")
-        else:
-            action_controls.pack(side="left")
-        self.record_button = ctk.CTkButton(
-            action_controls,
-            width=145,
-            height=36,
-            corner_radius=10,
-            text="อัดรอบใหม่",
-            image=self.icons["record"],
-            fg_color=PINK,
-            hover_color=PINK_HOVER,
-            font=self._font(10, "bold"),
-            command=self._record_run,
-        )
-        if narrow_profiles:
-            self.record_button.pack(side="left", fill="x", expand=True)
-        else:
-            self.record_button.pack(side="left")
-        self.edit_profile_button = ctk.CTkButton(
-            action_controls,
-            width=130,
-            height=36,
-            corner_radius=10,
-            text="แก้รายละเอียด",
-            image=self.icons["edit"],
-            fg_color=PURPLE_SOFT,
-            hover_color="#E4DFFF",
-            text_color="#5D4BC3",
-            font=self._font(10, "bold"),
-            command=self._edit_selected_profile,
-        )
-        if narrow_profiles:
-            self.edit_profile_button.pack(side="left", fill="x", expand=True, padx=7)
-        else:
-            self.edit_profile_button.pack(side="left", padx=7)
-        self.delete_profile_button = ctk.CTkButton(
-            action_controls,
-            width=120,
-            height=36,
-            corner_radius=10,
-            text="ลบโปรไฟล์",
-            image=self.icons["trash"],
-            fg_color="#FFF0F3",
-            hover_color="#FFE3E9",
-            text_color="#C84563",
-            font=self._font(10, "bold"),
-            command=self._delete_selected_profile,
-        )
-        if narrow_profiles:
-            self.delete_profile_button.pack(side="left", fill="x", expand=True)
-        else:
-            self.delete_profile_button.pack(side="left")
-        profile_hint = ctk.CTkLabel(
-            profile_actions,
-            text="แนะนำ 2–3 โปรไฟล์เพื่อให้แต่ละรอบไม่เหมือนกัน",
-            text_color="#969BAD",
-            font=self._font(9),
-            anchor="w" if narrow_profiles else "center",
-        )
-        if narrow_profiles:
-            profile_hint.pack(fill="x", pady=(8, 0))
-        else:
-            profile_hint.pack(side="right")
-
         log_card = self._card(body, 2, pady=(0, 0))
         log_header = self._section_header(log_card, "activity", "Live Activity", "ดูสถานะการทำงานแบบเรียลไทม์")
         ctk.CTkButton(
@@ -755,58 +607,7 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         )
         self.log.pack(fill="both", expand=True, padx=16, pady=(0, 14))
         self.log.configure(state="disabled")
-        self._append_log("READY  •  เช็ก ADB แล้วอัดโปรไฟล์แรกได้เลย\n")
-
-    def _select_profile(self, path):
-        self.selected_profile_path = path
-        self._refresh_profiles()
-
-    @staticmethod
-    def _format_profile_date(value):
-        if not value:
-            return "ไม่พบวันที่บันทึก"
-        try:
-            parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
-            return parsed.strftime("%d/%m/%Y  •  %H:%M น.")
-        except ValueError:
-            return str(value)
-
-    @staticmethod
-    def _format_profile_duration(seconds):
-        total = max(0, int(round(seconds)))
-        hours, remainder = divmod(total, 3600)
-        minutes, seconds = divmod(remainder, 60)
-        return f"{hours:d}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes:02d}:{seconds:02d}"
-
-    def _profile_metric(self, parent, position, icon, label, value, accent, selected):
-        tile = ctk.CTkFrame(
-            parent,
-            height=58,
-            corner_radius=11,
-            fg_color="#FFFFFF" if selected else "#F8F9FC",
-            border_width=1,
-            border_color="#E6E1FF" if selected else "#ECEEF4",
-        )
-        row, column = divmod(position, self.profile_metric_columns)
-        last_column = self.profile_metric_columns - 1
-        last_row = (4 - 1) // self.profile_metric_columns
-        tile.grid(
-            row=row,
-            column=column,
-            sticky="nsew",
-            padx=(0 if column == 0 else 3, 0 if column == last_column else 3),
-            pady=(0 if row == 0 else 3, 0 if row == last_row else 3),
-        )
-        tile.grid_propagate(False)
-        icon_box = ctk.CTkFrame(tile, width=30, height=30, corner_radius=9, fg_color=accent[0])
-        icon_box.pack(side="left", padx=(9, 7), pady=13)
-        icon_box.pack_propagate(False)
-        ctk.CTkLabel(icon_box, text="", image=self.icons[icon]).place(relx=0.5, rely=0.5, anchor="center")
-        copy = ctk.CTkFrame(tile, fg_color="transparent")
-        copy.pack(side="left", fill="y", pady=(8, 6))
-        ctk.CTkLabel(copy, text=label, text_color=MUTED, font=self._font(8, "bold"), anchor="w").pack(anchor="w")
-        ctk.CTkLabel(copy, text=value, text_color=accent[1], font=self._font(12, "bold"), anchor="w").pack(anchor="w")
-        return tile
+        self._append_log("READY  •  ตั้งค่าไอเทม แล้วทดสอบ ADB ก่อนเริ่ม\n")
 
     def _session_summary_tile(
         self,
@@ -855,200 +656,6 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             **detail_options,
         ).pack(anchor="w")
         return tile
-
-    def _bind_profile_card(self, widget, path):
-        """Make every non-button surface on a profile card selectable."""
-        if isinstance(widget, ctk.CTkButton):
-            return
-        widget.bind("<Button-1>", lambda _event, selected=path: self._select_profile(selected))
-        for child in widget.winfo_children():
-            self._bind_profile_card(child, path)
-
-    def _refresh_profiles(self):
-        previous = self.selected_profile_path
-        self.profiles = list_profiles()
-        if previous not in self.profiles:
-            self.selected_profile_path = self.profiles[0] if self.profiles else None
-        profile_count = len(self.profiles)
-        self.profile_count_var.set("ยังไม่มีโปรไฟล์" if profile_count == 0 else f"{profile_count} โปรไฟล์พร้อมใช้")
-
-        for child in self.profile_scroll.winfo_children():
-            child.destroy()
-        self.profile_rows = {}
-
-        if not self.profiles:
-            empty = ctk.CTkFrame(self.profile_scroll, height=130, corner_radius=14, fg_color="#FFFFFF", border_width=1, border_color=BORDER)
-            empty.grid(
-                row=0,
-                column=0,
-                columnspan=self.profile_grid_columns,
-                sticky="ew",
-                padx=4,
-                pady=4,
-            )
-            empty.grid_propagate(False)
-            icon_box = ctk.CTkFrame(empty, width=46, height=46, corner_radius=14, fg_color=PURPLE_SOFT)
-            icon_box.place(relx=0.5, rely=0.36, anchor="center")
-            ctk.CTkLabel(icon_box, text="", image=self.icons["profiles"]).place(relx=0.5, rely=0.5, anchor="center")
-            ctk.CTkLabel(
-                empty,
-                text="ยังไม่มีโปรไฟล์ — กด ‘อัดรอบใหม่’ เพื่อบันทึกการเล่นครั้งแรก",
-                text_color="#9297AA",
-                font=self._font(10),
-            ).place(relx=0.5, rely=0.73, anchor="center")
-            return
-
-        for index, path in enumerate(self.profiles, 1):
-            selected = path == self.selected_profile_path
-            try:
-                summary = profile_summary(path)
-                name = summary["name"]
-                recorded_at = self._format_profile_date(summary["created_at"])
-                duration = self._format_profile_duration(summary["duration_seconds"])
-                action_count = f"{summary['action_count']:,}"
-                coins = f"{summary['coins']:,}"
-                exp = f"{summary['exp']:,}"
-                jump_count = summary["jump_count"]
-                slide_count = summary["slide_count"]
-                pause_count = summary["pause_count"]
-                continue_count = summary["continue_count"]
-                quit_count = summary["quit_count"]
-                touch_count = summary["touch_count"]
-                keyboard_count = summary["keyboard_count"]
-                resolution = summary["resolution"]
-                resolution_text = "×".join(str(part) for part in resolution[:2])
-                file_size = f"{max(1, round(path.stat().st_size / 1024)):,} KB"
-            except (OSError, ValueError):
-                name = path.stem
-                recorded_at = "อ่านรายละเอียดโปรไฟล์ไม่ได้"
-                duration = action_count = coins = exp = "—"
-                jump_count = slide_count = pause_count = continue_count = quit_count = 0
-                touch_count = keyboard_count = 0
-                resolution_text = "—"
-                file_size = "—"
-
-            card_row, card_column = divmod(index - 1, self.profile_grid_columns)
-            card = ctk.CTkFrame(
-                self.profile_scroll,
-                height=300 if self.profile_metric_columns == 2 else 206,
-                corner_radius=15,
-                fg_color="#F4F1FF" if selected else "#FFFFFF",
-                border_width=2 if selected else 1,
-                border_color=PURPLE if selected else BORDER,
-            )
-            card.grid(
-                row=card_row,
-                column=card_column,
-                columnspan=self.profile_grid_columns if len(self.profiles) == 1 else 1,
-                sticky="nsew",
-                padx=(
-                    (4, 4)
-                    if self.profile_grid_columns == 1
-                    else ((4, 5) if card_column == 0 else (5, 4))
-                ),
-                pady=5,
-            )
-            card.grid_propagate(False)
-
-            heading = ctk.CTkFrame(card, height=49, fg_color="transparent")
-            heading.pack(fill="x", padx=12, pady=(10, 4))
-            heading.pack_propagate(False)
-            selector = ctk.CTkButton(
-                heading,
-                width=36,
-                height=36,
-                corner_radius=11,
-                text="✓" if selected else f"{index:02d}",
-                fg_color=PURPLE if selected else "#F1F2F7",
-                hover_color=PURPLE_HOVER if selected else "#E6E8F0",
-                text_color="#FFFFFF" if selected else "#74798E",
-                font=self._font(10, "bold"),
-                command=partial(self._select_profile, path),
-            )
-            selector.pack(side="left", padx=(0, 9), pady=6)
-            title_button = ctk.CTkButton(
-                heading,
-                height=45,
-                corner_radius=9,
-                text=f"{name}\n{recorded_at}",
-                anchor="w",
-                fg_color="transparent",
-                hover_color="#E8E3FF" if selected else "#F6F7FA",
-                text_color=TEXT,
-                font=self._font(11, "bold"),
-                command=partial(self._select_profile, path),
-            )
-            title_button.pack(side="left", fill="x", expand=True)
-            ctk.CTkLabel(
-                heading,
-                text="กำลังใช้" if selected else "พร้อมสุ่ม",
-                height=25,
-                corner_radius=8,
-                fg_color="#E4DEFF" if selected else "#EDF7F2",
-                text_color="#5A48C5" if selected else "#27805C",
-                font=self._font(8, "bold"),
-                padx=8,
-            ).pack(side="right", padx=(8, 0))
-
-            metrics = ctk.CTkFrame(card, fg_color="transparent")
-            metrics.pack(fill="x", padx=12, pady=(1, 7))
-            metrics.grid_columnconfigure(
-                tuple(range(self.profile_metric_columns)),
-                weight=1,
-                uniform="metric",
-            )
-            self._profile_metric(metrics, 0, "clock", "ระยะเวลา", duration, ("#F0EDFF", "#5D4BC3"), selected)
-            self._profile_metric(metrics, 1, "tap", "อินพุต", action_count, ("#E8F7F1", "#237C5B"), selected)
-            self._profile_metric(metrics, 2, "coin", "COINS", coins, ("#FFF6D9", "#B27A05"), selected)
-            self._profile_metric(metrics, 3, "xp", "EXP", exp, ("#FFEAF0", "#C74268"), selected)
-
-            stack_details = self.profile_metric_columns == 2
-            details = ctk.CTkFrame(
-                card,
-                height=86 if stack_details else 59,
-                corner_radius=10,
-                fg_color="#FFFFFF" if selected else "#FAFAFC",
-            )
-            details.pack(fill="x", padx=12, pady=(0, 10))
-            details.pack_propagate(False)
-            detail_copy = ctk.CTkFrame(details, fg_color="transparent")
-            if stack_details:
-                detail_copy.pack(fill="x", padx=10, pady=(6, 0))
-            else:
-                detail_copy.pack(side="left", fill="y", padx=10, pady=7)
-            ctk.CTkLabel(
-                detail_copy,
-                text=f"W  กระโดด {jump_count:,}   •   S  สไลด์ {slide_count:,}",
-                text_color="#555A70",
-                font=self._font(8, "bold"),
-                anchor="w",
-            ).pack(anchor="w")
-            ctk.CTkLabel(
-                detail_copy,
-                text=f"Pause {pause_count:,}   •   Continue {continue_count:,}   •   Quit {quit_count:,}",
-                text_color="#8B90A2",
-                font=self._font(8),
-                anchor="w",
-            ).pack(anchor="w")
-            detail_file_label = ctk.CTkLabel(
-                details,
-                text=(
-                    f"Touch {touch_count:,}  •  Key {keyboard_count:,}  •  {resolution_text}\n"
-                    f"{path.name}  •  {file_size}"
-                ),
-                text_color="#989CAE",
-                font=self._font(8),
-                anchor="w" if stack_details else "e",
-            )
-            if stack_details:
-                detail_file_label.pack(fill="x", padx=10, pady=(0, 5))
-            else:
-                detail_file_label.pack(side="right", padx=10)
-            self.profile_rows[path] = card
-            self._bind_profile_card(card, path)
-
-    def _selected_profile_path(self):
-        return self.selected_profile_path
 
     def _set_status(self, text, state):
         colors = {

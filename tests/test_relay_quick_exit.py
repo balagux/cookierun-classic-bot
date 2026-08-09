@@ -9,21 +9,12 @@ from bot import should_quick_exit_after_relay
 
 
 class RelayQuickExitTests(unittest.TestCase):
-    def test_enabled_for_bot_but_not_profile_recording(self):
+    def test_enabled_only_when_cookie_relay_is_selected(self):
         self.assertTrue(
-            should_quick_exit_after_relay(
-                {"use_cookie_relay": True, "record_profile": None}
-            )
+            should_quick_exit_after_relay({"use_cookie_relay": True})
         )
         self.assertFalse(
-            should_quick_exit_after_relay(
-                {"use_cookie_relay": True, "record_profile": "run.json"}
-            )
-        )
-        self.assertFalse(
-            should_quick_exit_after_relay(
-                {"use_cookie_relay": False, "record_profile": None}
-            )
+            should_quick_exit_after_relay({"use_cookie_relay": False})
         )
 
     def test_waits_for_relay_to_disappear_then_taps_pause_and_quit(self):

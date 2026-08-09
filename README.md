@@ -1,37 +1,36 @@
 # CookieRun Classic Bot
 
-บอทอัตโนมัติสำหรับ CookieRun Classic บน Windows ใช้ ADB จับภาพจาก Android/LDPlayer,
-OpenCV ตรวจหน้าจอ และระบบ Record/Replay สำหรับบันทึกการกระโดดและสไลด์ พร้อม GUI ภาษาไทย
-แบบ Profile Gallery
+โปรแกรมช่วยจัดการรอบ CookieRun Classic บน Windows ผ่าน ADB และ OpenCV โดยเน้นเมนูที่จำเป็น:
+เชื่อมต่อเกม เลือกซื้อไอเทม และสั่ง START/STOP บอทจากหน้าต่างขนาดกะทัดรัด
 
-> เวอร์ชันปัจจุบัน: **1.3.5**
-> โปรแกรมนี้เป็นโครงการทดลองสำหรับการเรียนรู้ระบบ Automation และ Computer Vision
-> การใช้งานกับบัญชีจริงอาจขัดกับข้อกำหนดของเกม ผู้ใช้ต้องรับผิดชอบความเสี่ยงด้วยตนเอง
+> เวอร์ชันปัจจุบัน: **1.4.0**
+>
+> โปรแกรมนี้เป็นโครงการทดลองด้าน Automation และ Computer Vision การใช้งานกับบัญชีจริง
+> อาจขัดกับข้อกำหนดของเกม ผู้ใช้ต้องรับผิดชอบความเสี่ยงด้วยตนเอง
 
-![หน้าหลัก CookieRun Classic Bot](docs/dashboard.png)
+## รุ่น 1.4.0
 
-## จุดเด่น
+- ย่อหน้าต่างโปรแกรมและเหลือเฉพาะส่วนควบคุมที่จำเป็น
+- นำหน้า Record, Profile Gallery และระบบเลือก Recorder ออกจาก GUI
+- คงระบบซื้อ Fast Start, Cookie Relay และ Desired Random Boost
+- คงปุ่ม START BOT / STOP BOT, จำนวนรอบ และสถิติ Coins/EXP
+- ปรับการเริ่มเกมให้ทนต่อกรณี `com.devsisters.crg` เปิดไม่สำเร็จ โดยลองเชื่อมต่อใหม่อย่างปลอดภัย
 
-- GUI สมัยใหม่ด้วย CustomTkinter ตัวหนังสือขนาดอ่านง่ายและมีไอคอน
-- เชื่อมต่อ LDPlayer/Android ผ่าน ADB โดยไม่เปิดหน้าต่าง CMD รบกวนการเล่น
-- Record การเล่นจากปุ่ม **W = กระโดด** และ **S = สไลด์**
-- เก็บ Pause, Continue และ Quit กลางรอบไว้ในโปรไฟล์
-- Replay ตามเวลาแบบ Absolute Timestamp อ้างอิงจังหวะกด Play เดียวกับตอนอัด พร้อมชดเชย ADB latency
-- สุ่มใช้โปรไฟล์ที่อัดไว้ 2–3 แบบ หรือใช้โปรไฟล์เดียวซ้ำได้
-- กำหนดจำนวนรอบได้ โดย `0` หมายถึงเล่นไม่จำกัด
-- หากหลุดกลับ Main Menu ก่อนจบรอบ จะยกเลิกอินพุตที่ค้าง ไม่นับรอบนั้น และเริ่มใหม่
-- ซื้อและใช้ Fast Start, Cookie Relay และ Desired Random Boost ได้อัตโนมัติ
-- Cookie Relay จะซื้อเฉพาะตอนของเหลือ `0`
-- เมื่อ START BOT และเปิด Cookie Relay บอทจะรอไม้ 2 วิ่งออกมา แล้ว Pause → Quit กลับหน้าหลักเพื่อเริ่มรอบใหม่ทันที
-- Desired Random Boost ตรวจเครื่องหมายถูกก่อน Multi-Buy และไม่ใช้ Coins หากเลือกไม่สำเร็จ
-- ตรวจและกดปุ่ม Confirm อัตโนมัติจาก Main Loop โดยไม่เปิดตัวจับภาพ ADB ซ้ำระหว่าง Replay
-- OCR อ่าน Coins และ XP จากหน้า Result หลังตัวเลขและตัวคูณหยุดนับ
-- สรุปรอบที่เล่นสำเร็จ Coins/EXP รวม และค่าเฉลี่ยต่อรอบแบบเรียลไทม์
-- แสดงเวลาที่บอททำงานแบบ `ชั่วโมง:นาที:วินาที` และค้างเวลารวมไว้หลังหยุด
-- เมื่อกด START BOT ครั้งใหม่ จะรีเซ็ตจำนวนรอบ, Coins/EXP รวม และค่าเฉลี่ยเป็น session ใหม่
-- รับ Mystery Box, Level Up, Daily Reward, Relic และหน้ารางวัลหลังจบเกม
-- ตรวจ Anti-Bot ได้ทั้งโจทย์ jumping/sliding card, Connection Lost และ Inactive พร้อมกู้สถานะอัตโนมัติ
-- โปรไฟล์แสดงวันที่อัด เวลา อินพุต Coins/EXP จำนวนกระโดด/สไลด์ และรายละเอียดไฟล์ครบ
+## โปรแกรมทำอะไรได้บ้าง
+
+- เชื่อมต่อ LDPlayer/Android ผ่าน ADB โดยไม่เปิดหน้าต่าง CMD รบกวน
+- เริ่มจาก Main Menu แล้วเข้าเมนูซื้อไอเทมตามที่เลือก
+- ซื้อ Fast Start และ Cookie Relay ตามเงื่อนไขในเกม
+- เลือก Desired Random Boost และยืนยันตัวเลือกก่อนซื้อ
+- กด Play และตรวจหน้าจอระหว่างรอบ
+- กด Confirm, Result และหน้ารางวัลที่รองรับ
+- รับ Mystery Box, Level Up, Daily Reward, Relic และรางวัลหลังจบเกม
+- ตรวจ Anti-Bot, Connection Lost และ Inactive พร้อมพยายามกู้สถานะ
+- OCR อ่าน Coins/EXP หลังค่าบนหน้า Result หยุดนับ
+- สรุปจำนวนรอบ ยอดรวม ค่าเฉลี่ย และเวลาทำงานของ Session
+
+รุ่นนี้ไม่มีเมนู Record/Replay ใน GUI และไม่อัดหรือเล่นจังหวะ W/S ให้ ผู้ใช้ควบคุมการเล่น
+หรือใช้ระบบภายนอกของ Emulator ได้เอง โดยบอทยังคงดูแลเมนู ไอเทม ผลรอบ และรางวัลตามเดิม
 
 ## ดาวน์โหลดสำหรับ Windows
 
@@ -44,7 +43,7 @@ OpenCV ตรวจหน้าจอ และระบบ Record/Replay สำ
 
 - Windows 10 หรือ Windows 11 แบบ 64-bit
 - LDPlayer หรือ Android Emulator ที่เปิด ADB ได้
-- ความละเอียดหน้าจอ Emulator **1280×720 เท่านั้น**
+- ความละเอียดภายใน Emulator **1280×720 เท่านั้น**
 - Android Platform Tools (ADB)
 
 โปรแกรมค้นหา `adb.exe` ตามลำดับนี้:
@@ -53,105 +52,31 @@ OpenCV ตรวจหน้าจอ และระบบ Record/Replay สำ
 2. `D:\platform-tools-latest-windows\platform-tools\adb.exe`
 3. ADB ที่อยู่ในตัวแปร `PATH`
 
-## เริ่มใช้งานแบบรวดเร็ว
+## เริ่มใช้งาน
 
-1. ตั้งความละเอียด LDPlayer เป็น `1280×720`
+1. ตั้งความละเอียดภายใน LDPlayer เป็น `1280×720`
 2. เปิด ADB debugging ของ LDPlayer
-3. เปิด CookieRun Classic และค้างไว้ที่หน้าหลัก
+3. เปิด CookieRun Classic และค้างไว้ที่ Main Menu
 4. เปิด CookieRun Classic Bot
 5. กรอก IP/Host และ Port เช่น `127.0.0.1:5556`
-6. กด **ทดสอบ ADB** ต้องเห็นข้อความเชื่อมต่อสำเร็จและความละเอียด `1280×720`
-7. อัดโปรไฟล์อย่างน้อยหนึ่งรอบ
-8. เลือกตัวช่วยที่ต้องการและกด **START BOT**
+6. กด **ทดสอบ ADB** และตรวจว่ารายงานความละเอียด `1280×720`
+7. เลือก Fast Start, Cookie Relay หรือ Random Boost ที่ต้องการ
+8. กำหนดจำนวนรอบ โดย `0` หมายถึงเล่นต่อเนื่อง
+9. กด **START BOT** และกด **STOP BOT** เมื่อต้องการหยุด
 
-## การอัดโปรไฟล์
+เมื่อกด START BOT โปรแกรมจะรีเซ็ตจำนวนรอบ Coins/EXP รวม ค่าเฉลี่ย และเวลาของ Session ใหม่
 
-1. เลือก Fast Start, Cookie Relay หรือ Random Boost ที่ต้องการใช้ในรอบอัด
-2. กด **อัดรอบใหม่** และตั้งชื่อโปรไฟล์
-3. รอจน Log แจ้งว่าเริ่ม Record แล้ว
-4. เล่นด้วยปุ่ม:
-   - `W` = กระโดด
-   - `S` = สไลด์
-5. เล่นจนถึงหน้า Result หรือกด Pause → Quit หากต้องการโปรไฟล์แบบจบบางส่วน
+## ตัวเลือกซื้อไอเทม
 
-โปรไฟล์จะบันทึกอัตโนมัติหลังทุกอินพุต จึงยังเก็บข้อมูลได้หากโปรแกรมหยุดก่อนจบรอบ
+### Fast Start
 
-### ข้อมูลที่แสดงในการ์ดโปรไฟล์
+เมื่อเปิดตัวเลือกนี้ บอทจะซื้อและใช้ Fast Start ก่อนกด Play
 
-- ชื่อและวันที่บันทึก
-- ระยะเวลารวม
-- จำนวนอินพุตทั้งหมด
-- Coins และ EXP ที่ OCR อ่านได้
-- จำนวนกระโดดและสไลด์
-- จำนวน Pause, Continue และ Quit
-- จำนวน Touch และ Keyboard event
-- ความละเอียดหน้าจอ ชื่อไฟล์ และขนาดไฟล์
+### Cookie Relay
 
-## การ Replay
+บอทจะซื้อ Cookie Relay เมื่อของเหลือ `0` และใช้ระบบ Relay/ออกจากรอบเร็วตาม Stage ที่ตรวจพบ
 
-- บอทเลือกหนึ่งโปรไฟล์แบบสุ่มก่อนเริ่มแต่ละรอบ
-- ถ้ามีโปรไฟล์เดียว จะใช้โปรไฟล์นั้นทุกครั้ง
-- ควรอัด 2–3 รอบเพื่อให้รูปแบบการเล่นต่างกัน
-- Replay ใช้พิกัดเดิมจาก Record โดยไม่สุ่มขยับตำแหน่ง
-- ระบบใช้ Absolute Timestamp เพื่อไม่ให้ความคลาดเคลื่อนสะสมทีละคำสั่ง
-- จุดเริ่มเวลาของ Record และ Replay ยึดจากจังหวะที่บอทกด Play จริง ไม่ขึ้นกับเวลารอเปลี่ยนหน้า
-- Scheduler ส่งคำสั่งตาม deadline โดยตรงและใช้ Windows timer ความละเอียด 1 ms เพื่อลด jitter
-- ค่า ADB latency เริ่มต้นชดเชยไว้ `40 ms` ตามการวัดกับ LDPlayer
-
-โปรไฟล์รูปแบบเก่ายังเล่นได้ โดยระบบจะใช้จุดเริ่มแบบเข้ากันได้ที่ `1.1 วินาที` แทนเวลาสุ่มเดิม
-แต่ควร **อัดโปรไฟล์ใหม่ด้วยรุ่น 1.3.1** เพื่อให้ Record และ Replay อ้างอิงจังหวะกด Play เดียวกันอย่างแม่นยำ
-
-### ออกเร็วหลัง Cookie Relay
-
-เมื่อเปิด **Cookie Relay** แล้วกด START BOT ระบบจะทำงานดังนี้ทุกครั้งที่ไม้แรกหมดพลัง:
-
-1. หยุดอินพุต Replay ที่ยังเหลืออยู่
-2. กดใช้ Cookie Relay
-3. รอหน้า Relay หายและเผื่อเวลาให้ไม้ 2 วิ่งออกมา
-4. กด Pause → Quit → ยืนยัน Quit ชั้นที่สอง
-5. รอหน้า Result และอ่าน Coins/EXP จนตัวเลขหยุดนับ แล้วกด OK
-6. รับ Mystery Box, Level Up หรือรางวัลที่คั่นอยู่จนกลับ Main Menu
-7. เริ่มรอบถัดไปทันทีโดยไม่เพิ่มเวลารอแบบสุ่ม
-
-โหมดนี้ไม่ทำงานระหว่าง **อัดโปรไฟล์** เพื่อไม่ให้บอทตัดการอัดเอง รอบ Quick Exit ที่พบหน้า Result
-จะอ่าน Coins/EXP ค่าสุดท้ายและนำมารวมในสถิติเหมือนรอบปกติ
-
-หากกลับถึง Main Menu ก่อนพบ `GAME_COMPLETE` บอทจะหยุดชุด Replay เก่า ลดจำนวน Attempt กลับ
-และเริ่มขั้นตอน Start → ซื้อของ → Play ใหม่ทันที
-
-## Coins และ EXP จากหน้า Result
-
-OCR ทำงานภายในเครื่องด้วย RapidOCR/ONNX Runtime ไม่มีการส่งภาพไปเซิร์ฟเวอร์ภายนอก
-
-ขั้นตอนการอ่านค่า:
-
-1. ตรวจพบหน้า Result
-2. หยุด Recorder/Replay ทันที
-3. รออย่างน้อย 2.5 วินาทีให้ตัวคูณเริ่มคำนวณครบ
-4. อ่าน Coins และ XP ซ้ำทุก 0.45 วินาที
-5. ต้องได้ค่าเดิมติดต่อกัน 3 ครั้งจึงถือเป็นค่าสุดท้าย
-6. บันทึกค่าลงโปรไฟล์แล้วจึงกด OK
-
-ใน Log จะเห็นข้อความลักษณะนี้:
-
-```text
-[OCR] Reward count-up: coins=1198 exp=123
-[OCR] Final rewards stable: coins=1198 exp=123
-```
-
-หาก OCR อ่านไม่ได้ ระบบจะเก็บค่าเดิมไว้และบันทึกภาพใน `debug_screens/` สำหรับปรับตำแหน่งภายหลัง
-
-### สรุปผลการเล่นใน GUI
-
-แผงสรุปจะอัปเดตทุกครั้งที่จบรอบและรีเซ็ตเมื่อกด START BOT ครั้งใหม่ โดยแสดง:
-
-- จำนวนรอบที่สำเร็จเทียบกับรอบที่เริ่มทั้งหมด
-- Coins รวม และ Coins เฉลี่ยต่อรอบที่สำเร็จ
-- EXP รวม และ EXP เฉลี่ยต่อรอบที่สำเร็จ
-
-รอบที่หลุดกลับ Main Menu ก่อนถึงหน้า Result จะไม่นำมาคิดยอดรวมหรือค่าเฉลี่ย
-
-## Desired Random Boost
+### Desired Random Boost
 
 รองรับตัวเลือกต่อไปนี้:
 
@@ -167,163 +92,98 @@ OCR ทำงานภายในเครื่องด้วย RapidOCR/ONN
 10. Magnetic Aura
 11. 2 Pit Lifts
 
-หลังเปิด Multi-Buy บอทจะกดตัวเลือก ตรวจเครื่องหมายถูกสีเขียว และลองซ้ำสูงสุด 3 ครั้ง
-หากยังยืนยันไม่ได้จะปิดหน้าต่างโดยไม่กด Multi-Buy
+หลังเปิด Multi-Buy บอทจะเลือก Boost ตรวจเครื่องหมายถูก และลองซ้ำตามจำนวนที่กำหนด
+หากยืนยันตัวเลือกไม่ได้จะปิดหน้าต่างโดยไม่กดซื้อ
+
+## Coins และ EXP
+
+OCR ทำงานภายในเครื่องด้วย RapidOCR/ONNX Runtime ไม่มีการส่งภาพไปเซิร์ฟเวอร์ภายนอก
+เมื่อพบหน้า Result โปรแกรมจะรอให้ตัวเลขหยุดนับ อ่านซ้ำจนได้ค่าคงที่ แล้วจึงรวมผลเข้า Session
+
+หน้าสรุปแสดงข้อมูลต่อไปนี้:
+
+- จำนวนรอบที่เริ่มและจบสำเร็จ
+- Coins รวมและค่าเฉลี่ยต่อรอบ
+- EXP รวมและค่าเฉลี่ยต่อรอบ
+- เวลาที่บอททำงานใน Session
+
+รอบที่หลุดกลับ Main Menu ก่อนถึง Result จะไม่นำมาคิดยอดรวมหรือค่าเฉลี่ย
+
+## แก้ปัญหาเบื้องต้น
+
+### `Failed to start com.devsisters.crg after 5 attempts`
+
+1. ปิดโปรแกรมและ LDPlayer ให้หมด
+2. เปิด LDPlayer ใหม่และรอจน Android เข้าหน้าหลัก
+3. เปิด ADB debugging แล้วตรวจ Port ของ Instance
+4. เปิดโปรแกรมและกด **ทดสอบ ADB** ก่อน START BOT
+5. หากยังไม่สำเร็จ ให้ตรวจว่า Port ไม่ถูก Instance อื่นใช้ และลอง Restart ADB/LDPlayer
+
+### เชื่อมต่อ ADB ไม่ได้
+
+- ตรวจ IP/Port เช่น `127.0.0.1:5556`
+- ตรวจว่า `adb.exe` อยู่ที่ `D:\platform-tools-latest-windows\platform-tools\adb.exe`
+- ตรวจ Firewall และการตั้งค่า ADB debugging ใน Emulator
+- หากใช้หลาย Instance ให้เลือก Port ของหน้าต่างที่เปิดเกมอยู่
+
+### โปรแกรมแจ้งความละเอียดไม่รองรับ
+
+Coordinate และ Template ของเกมรองรับเฉพาะ `1280×720` การย่อหน้าต่าง GUI บนจอคอม
+ไม่เปลี่ยนข้อกำหนดความละเอียดภายใน Emulator
+
+### OCR อ่าน Coins/EXP ไม่ได้
+
+- อย่ากด OK บนหน้า Result ก่อนตัวเลขหยุดนับ
+- ตรวจว่าหน้าจอเกมเป็น 1280×720 และไม่มีหน้าต่างอื่นบัง
+- ดูภาพวิเคราะห์ใน `debug_screens/`
 
 ## รันจาก Source Code
 
-### 1. Clone repository
-
 ```powershell
-git clone <repository-url>
+git clone https://github.com/balagux/cookierun-classic-bot.git
 cd cookierun-classic-bot
-```
-
-### 2. สร้าง Virtual Environment
-
-```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-```
-
-### 3. ติดตั้ง Dependency
-
-```powershell
 pip install -r requirements.txt
-```
-
-Dependency หลัก:
-
-- NumPy
-- OpenCV
-- CustomTkinter
-- Pillow
-- RapidOCR
-- ONNX Runtime
-
-### 4. เปิด GUI
-
-```powershell
 python main.py
 ```
 
 หรือดับเบิลคลิก `start_gui.bat`
 
-## สร้างไฟล์ EXE
-
-ติดตั้ง Build dependency:
+## สร้าง EXE และ Installer
 
 ```powershell
 pip install -r requirements-build.txt
-```
-
-จากนั้นรัน:
-
-```powershell
 .\build_exe.bat
-```
-
-ไฟล์จะอยู่ที่:
-
-```text
-dist\CookieRunClassicBot.exe
-```
-
-## สร้าง Installer
-
-ติดตั้ง [Inno Setup 6](https://jrsoftware.org/isinfo.php) แล้วรัน:
-
-```powershell
 .\build_installer.bat
 ```
 
-ไฟล์จะอยู่ที่:
+ไฟล์ที่ได้:
 
-```text
-installer\CookieRunClassicBot-Setup.exe
-```
+- `dist\CookieRunClassicBot.exe`
+- `installer\CookieRunClassicBot-Setup.exe`
+
+การสร้าง Installer ต้องติดตั้ง [Inno Setup 6](https://jrsoftware.org/isinfo.php)
 
 ## โครงสร้างโปรเจกต์
 
 ```text
 ├── main.py                จุดเริ่มต้นโปรแกรม
-├── modern_gui.py          GUI หลักแบบ Profile Gallery
-├── gui.py                 Logic พื้นฐานของ GUI
+├── modern_gui.py          หน้าต่างโปรแกรม
+├── gui.py                 Logic ของ GUI และสถิติ Session
 ├── bot.py                 Game loop และการจัดการ Stage
-├── actions.py             คำสั่งกดปุ่ม/ซื้อของ/รับรางวัล
+├── actions.py             คำสั่งกดปุ่ม ซื้อของ และรับรางวัล
 ├── adb.py                 การเชื่อมต่อ จับภาพ และส่งอินพุตผ่าน ADB
 ├── detection.py           OpenCV template matching
-├── macro.py               Record, Profile และ Replay
-├── result_ocr.py          OCR อ่าน Coins/XP
+├── result_ocr.py          OCR อ่าน Coins/EXP
 ├── config.py              Template, Region, Coordinate และ Timing
 ├── runtime_paths.py       Path สำหรับ Source/EXE
 ├── templates/             ภาพ Template ที่ความละเอียด 1280×720
-├── build_exe.py           สร้าง EXE ด้วย PyInstaller
-├── installer.iss          ตั้งค่า Inno Setup
-└── requirements.txt       Python dependency
+└── tests/                 Automated tests
 ```
-
-## การแก้ปัญหา
-
-### CMD เด้งรัวระหว่างเล่น
-
-ใช้รุ่น 1.1.2 ขึ้นไป คำสั่ง ADB ทุกตัวจะทำงานด้วย `CREATE_NO_WINDOW`
-
-### ปุ่ม W/S กดไม่ติด
-
-- ตรวจว่า LDPlayer ใช้ความละเอียด 1280×720
-- ปิดโปรแกรม Overlay หรือโปรแกรมจับคีย์อื่น
-- ทดสอบ ADB ใหม่
-- Record โปรไฟล์ใหม่หลังเปลี่ยนความละเอียดหรือ Key mapping
-
-### ไม่เลือก Random Boost
-
-- ตรวจว่าเปิดสวิตช์ Random Boost ใน GUI
-- ดู Log ว่ามี `Boost option checked`
-- ตั้งหน้าจอเป็น 1280×720
-
-### ไม่กด Confirm
-
-- ตรวจว่า Log ยังทำงานและบอทยังไม่หยุด
-- ตรวจความละเอียด 1280×720
-- บันทึกภาพ Debug หากรูปปุ่มในเกมเปลี่ยน
-
-### Coins/EXP ไม่ตรง
-
-- รอ Log `Final rewards stable`
-- ตรวจว่า Result screen ไม่ถูกหน้าต่างอื่นบัง
-- ดูภาพล่าสุดใน `debug_screens/`
-
-### ไม่พบโปรไฟล์
-
-โปรไฟล์ Source อยู่ใน `recordings/` ส่วนรุ่นติดตั้งจะเก็บ `recordings/` ข้างไฟล์ EXE
-
-## ข้อมูลที่ไม่ควร Commit
-
-`.gitignore` ถูกตั้งให้ไม่อัปโหลดข้อมูลต่อไปนี้:
-
-- โปรไฟล์ส่วนตัวใน `recordings/`
-- `gui_settings.json` ซึ่งอาจมี IP/Port
-- ภาพใน `debug_screens/`
-- Build cache, EXE และ Installer
-- Virtual environment และไฟล์ Log
 
 ## หมายเหตุ
 
-- Coordinate และ Template ทั้งหมดออกแบบสำหรับ **1280×720**
-- **ความละเอียดหน้าจอเกม/LDPlayer 800×600 ยังไม่รองรับ** โปรแกรมจะหยุดพร้อมแจ้งแทนการกดด้วยพิกัดผิด (คนละส่วนกับหน้าต่าง GUI ซึ่งเปิดบนจอคอม 800×600 ได้)
-- โปรไฟล์ Version 3 และเก่ากว่ายังเปิดได้ด้วย offset compatibility 1.1 วินาที แต่ควรอัดใหม่ด้วย Version 4 เพื่อใช้ timeline จากจังหวะกด Play โดยตรง
 - UI หรือภาพในเกมเปลี่ยนอาจทำให้ต้องถ่าย Template ใหม่
 - Timing อาจต่างกันตามสเปกเครื่องและอาการ Lag ของ Emulator
 - โปรเจกต์ยังไม่ได้ระบุสัญญาอนุญาต (License) สำหรับการนำไปแจกจ่ายต่อ
-
-## ผลตรวจรุ่น 1.3.5
-
-- Automated tests ผ่าน 24 รายการ: Record/Replay timing, Relay quick-exit, Anti-Bot, Stage/Template, OCR statistics, session timer/reset, app reset, responsive GUI และ Windows DPI scaling
-- หน้าต่าง GUI ปรับขนาดตามพื้นที่จอคอมอัตโนมัติ รองรับทั้ง 1024×768 และ 800×600 โดยไม่ล้นออกนอกจอ
-- โหมดจอเล็กมี Scroll ทั้งแถบเมนูซ้ายและเนื้อหาหลัก พร้อมย้าย START/STOP ไว้ด้านบนให้กดได้ทันที
-- การ์ดตั้งค่า สรุป Coins/EXP และโปรไฟล์จะเรียงใหม่ตามความกว้างเพื่อไม่ให้ข้อความหรือปุ่มถูกตัด
-- ทดสอบจริง 1 รอบที่ 1280×720 ผ่าน Main Menu → ตรวจ stock Cookie Relay → เลือก Double Coins → Replay → Relay → Pause/Quit/Confirm → Result OCR → Mystery Box → Main Menu
-- ผล OCR จากรอบทดสอบจริง: `101,055 Coins` และ `3,266 EXP` หลังรอค่าคงที่
-- หน้า Party Run มี handler แล้ว และกรอบ Too Many Treasures มีขนาดพอสำหรับ Template
-- ปิดงานรับ/ส่งหัวใจอัตโนมัติที่ไม่แสดงใน GUI เพื่อไม่ให้แทรกกลางการเล่นหรือค้างเมื่อเปิดยาว

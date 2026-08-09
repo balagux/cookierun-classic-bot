@@ -10,8 +10,6 @@ TEMPLATE_DIR = str(resource_path("templates"))
 MATCH_THRESHOLD = 0.8
 SESSION_RESET_INTERVAL = (5400, 10800)  # 1.5-3 hours
 NEXT_GAME_DELAY = (0.5, 1.0)  # seconds between completed runs
-REPLAY_INPUT_LEAD_TIME = 0.04  # measured Windows -> LDPlayer ADB input latency
-LEGACY_REPLAY_START_DELAY = 1.1  # midpoint of the old random 0.8-1.4 second delay
 RELAY_QUICK_EXIT_MIN_WAIT = 1.2  # let the second cookie visibly begin its run
 RELAY_QUICK_EXIT_TIMEOUT = 2.5
 RELAY_QUICK_EXIT_RUNOUT_BUFFER = 0.35
@@ -231,7 +229,7 @@ DETECTION_GROUP_IN_GAME = (
     "GAME_START",
     "GAME_RELAY",
     "GAME_COMPLETE",
-    "MAINMENU",  # recover immediately after a recorded Pause -> Quit
+    "MAINMENU",  # recover immediately when a run returns to the main menu
 )
 
 DETECTION_GROUP_POST_GAME = (

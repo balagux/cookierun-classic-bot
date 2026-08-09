@@ -53,9 +53,6 @@ def build_parser():
     parser.add_argument("--fast-start", action="store_true")
     parser.add_argument("--cookie-relay", action="store_true")
     parser.add_argument("--boost-index", type=int, choices=range(0, len(BOOST_CHOICES) + 1), default=0)
-    parser.add_argument("--record-profile", help=argparse.SUPPRESS)
-    parser.add_argument("--profile-name", help=argparse.SUPPRESS)
-    parser.add_argument("--replay-profile", action="append", default=[], help=argparse.SUPPRESS)
     parser.add_argument("--max-runs", type=int, default=0, help=argparse.SUPPRESS)
     return parser
 
@@ -68,9 +65,6 @@ def _options_from_args(args):
         "use_desired_random_boost": boost is not None,
         "desired_boost_template": boost[1] if boost else None,
         "desired_boost_name": boost[0] if boost else None,
-        "record_profile": args.record_profile,
-        "profile_name": args.profile_name,
-        "replay_profiles": args.replay_profile,
         "max_runs": max(0, args.max_runs),
     }
 
@@ -114,16 +108,27 @@ def main(argv=None):
             return 1
 
     if args.console:
-        run_bot(device_ip=args.device_ip, device_port=args.device_port)
-        return 0
+        try:
+            run_bot(device_ip=args.device_ip, device_port=args.device_port)
+            return 0
+        except Exception as exc:
+            print(f"❌ Bot stopped safely: {exc}")
+            return 1
 
     if args.run_bot:
-        run_bot(
-            options=_options_from_args(args),
-            device_ip=args.device_ip,
-            device_port=args.device_port,
-        )
-        return 0
+        try:
+            run_bot(
+                options=_options_from_args(args),
+                device_ip=args.device_ip,
+                device_port=args.device_port,
+            )
+            return 0
+        except Exception as exc:
+            # A frozen/windowed worker must never leak an unhandled exception;
+            # PyInstaller would otherwise show a disruptive crash dialog over
+            # the emulator.  The GUI receives this line and the non-zero exit.
+            print(f"❌ Bot stopped safely: {exc}")
+            return 1
 
     from modern_gui import launch_gui
 
