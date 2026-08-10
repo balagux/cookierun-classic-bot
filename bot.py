@@ -23,6 +23,7 @@ from actions import (
     complete_finish,
     handle_anti_bot,
     handle_inactive,
+    handle_send_friend_life,
     open_relic_complete,
     play_game,
     purchase_cookie_relay,
@@ -165,6 +166,35 @@ def configure_device(device_ip, device_port):
     DEVICE_PORT = int(device_port)
     actions_module.DEVICE_IP = DEVICE_IP
     actions_module.DEVICE_PORT = DEVICE_PORT
+
+
+def send_friend_hearts(device_ip=None, device_port=None):
+    """Run the one-shot Friends leaderboard action without restarting the game."""
+    configure_device(
+        DEVICE_IP if device_ip is None else device_ip,
+        DEVICE_PORT if device_port is None else device_port,
+    )
+    print(f"📱 Connecting to device at {DEVICE_IP}:{DEVICE_PORT}...")
+    device_connect(DEVICE_IP, DEVICE_PORT)
+    initial_screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
+    if initial_screen is None:
+        raise RuntimeError("Connected, but the device screenshot could not be decoded.")
+    screen_height, screen_width = initial_screen.shape[:2]
+    if (screen_width, screen_height) != (1280, 720):
+        raise RuntimeError(
+            f"Unsupported screen resolution {screen_width}x{screen_height}; "
+            "this version requires LDPlayer 1280x720."
+        )
+    load_templates()
+    if detect_stage(initial_screen, ("MAINMENU",)) != "MAINMENU":
+        raise RuntimeError(
+            "Main/Friends leaderboard not detected. Open the Friends "
+            "leaderboard from the main screen before pressing Send Hearts."
+        )
+    sent_count = handle_send_friend_life()
+    print(f"✅ ส่งหัวใจเสร็จแล้วทั้งหมด {sent_count} คน")
+    print(f"[HEARTS] sent={sent_count}")
+    return sent_count
 
 
 def _reset_app_or_raise(failure_reason):

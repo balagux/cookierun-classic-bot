@@ -36,6 +36,7 @@ class CookieRunBotGUI:
         self.connection_test_running = False
         self._session_started_at = None
         self._session_last_elapsed_second = None
+        self._heart_sent_count = None
 
         self.ip_var = tk.StringVar(value=DEVICE_IP)
         self.port_var = tk.StringVar(value=str(DEVICE_PORT))
@@ -142,6 +143,22 @@ class CookieRunBotGUI:
         )
         style.map("Danger.TButton", background=[("active", "#363a5a"), ("pressed", "#20233c")])
         style.configure(
+            "Heart.TButton",
+            background="#2e9f78",
+            foreground="#ffffff",
+            bordercolor="#2e9f78",
+            lightcolor="#2e9f78",
+            darkcolor="#2e9f78",
+            borderwidth=0,
+            font=("Segoe UI Semibold", 10),
+            padding=(14, 10),
+        )
+        style.map(
+            "Heart.TButton",
+            background=[("active", "#38ad85"), ("pressed", "#278766"), ("disabled", "#425a58")],
+            foreground=[("disabled", "#94aaa7")],
+        )
+        style.configure(
             "TCheckbutton",
             background="#ffffff",
             foreground="#3f4459",
@@ -214,7 +231,7 @@ class CookieRunBotGUI:
         ).pack(anchor="w")
         tk.Label(
             brand_copy,
-            text="CLASSIC  •  v1.4.1",
+            text="CLASSIC  •  v1.4.2",
             bg="#171a2e",
             fg="#797e9b",
             font=("Segoe UI Semibold", 8),
@@ -252,6 +269,13 @@ class CookieRunBotGUI:
             state="disabled",
         )
         self.stop_button.pack(fill="x", pady=(7, 12))
+        self.send_hearts_button = ttk.Button(
+            run_panel,
+            text="♥   ส่งหัวใจ",
+            style="Heart.TButton",
+            command=self._send_hearts,
+        )
+        self.send_hearts_button.pack(fill="x", pady=(0, 12))
         repeat_row = tk.Frame(run_panel, bg="#20233b")
         repeat_row.pack(fill="x")
         tk.Label(
@@ -471,6 +495,20 @@ class CookieRunBotGUI:
         command.extend(["--max-runs", str(max_runs)])
         self._launch_process(command, "bot")
 
+    def _send_hearts(self):
+        """Run the friend-heart sender as a separate, stoppable worker."""
+        if self.process is not None and self.process.poll() is None:
+            return
+        try:
+            command = self._base_command("--send-hearts")
+        except ValueError as exc:
+            messagebox.showerror("ข้อมูลไม่ถูกต้อง", str(exc), parent=self.root)
+            return
+
+        self._heart_sent_count = None
+        self._append_log("\nส่งหัวใจ: กรุณาเปิดรายชื่อเพื่อนบนหน้าหลักไว้ก่อน\n")
+        self._launch_process(command, "hearts")
+
     def _append_play_options(self, command):
         if self.fast_start_var.get():
             command.append("--fast-start")
@@ -503,17 +541,21 @@ class CookieRunBotGUI:
                 env=env,
             )
         except OSError as exc:
-            self._append_log(f"เริ่มบอทไม่สำเร็จ: {exc}\n")
+            activity = "ส่งหัวใจ" if mode == "hearts" else "บอท"
+            self._append_log(f"เริ่ม{activity}ไม่สำเร็จ: {exc}\n")
             self._set_status("เริ่มไม่สำเร็จ", "error")
             return
 
-        self._append_log("\n──────── เริ่มการทำงาน ────────\n")
+        if mode == "hearts":
+            self._append_log("──────── เริ่มส่งหัวใจทีละคน ────────\n")
+        else:
+            self._append_log("\n──────── เริ่มการทำงาน ────────\n")
         self.process_mode = mode
         if mode == "bot":
             self._begin_bot_session()
         self.stop_requested = False
         self._set_running_controls(True)
-        self._set_status("บอทกำลังทำงาน", "running")
+        self._set_status("กำลังส่งหัวใจ..." if mode == "hearts" else "บอทกำลังทำงาน", "running")
         if worker_log is not None:
             reader = self._read_bot_log
             reader_args = (self.process, worker_log)
@@ -566,7 +608,8 @@ class CookieRunBotGUI:
         self.stop_requested = True
         self._set_status("กำลังหยุด...", "testing")
         self.stop_button.configure(state="disabled")
-        self._append_log("กำลังส่งคำสั่งหยุดบอท...\n")
+        activity = "การส่งหัวใจ" if self.process_mode == "hearts" else "บอท"
+        self._append_log(f"กำลังส่งคำสั่งหยุด{activity}...\n")
         threading.Thread(target=self._terminate_process, args=(process,), daemon=True).start()
 
     def _terminate_process(self, process):
@@ -590,6 +633,7 @@ class CookieRunBotGUI:
         self.connection_test_running = True
         self.test_button.configure(state="disabled")
         self.start_button.configure(state="disabled")
+        self.send_hearts_button.configure(state="disabled")
         self._set_status("กำลังทดสอบ ADB...", "testing")
         self._append_log("\nกำลังทดสอบการเชื่อมต่อ ADB...\n")
         threading.Thread(target=self._run_connection_test, args=(command,), daemon=True).start()
@@ -648,7 +692,12 @@ class CookieRunBotGUI:
                 event, payload = self.events.get_nowait()
                 if event == "log":
                     self._append_log(payload)
-                    self._update_session_stats(payload)
+                    if self.process_mode == "bot":
+                        self._update_session_stats(payload)
+                    elif self.process_mode == "hearts":
+                        heart_match = re.search(r"\[HEARTS\]\s+sent=(\d+)", payload)
+                        if heart_match:
+                            self._heart_sent_count = int(heart_match.group(1))
                 elif event == "bot_exit":
                     process, return_code = payload
                     if process is self.process:
@@ -657,14 +706,24 @@ class CookieRunBotGUI:
                         self.process = None
                         self.process_mode = None
                         self._set_running_controls(False)
-                        if self.stop_requested or return_code == 0:
-                            self._set_status("หยุดแล้ว", "idle")
+                        if self.stop_requested:
+                            status = "หยุดส่งหัวใจแล้ว" if finished_mode == "hearts" else "หยุดแล้ว"
+                            self._set_status(status, "idle")
                             duration_note = f" • ใช้เวลา {elapsed_text}" if elapsed_text else ""
-                            self._append_log(
-                                f"──────── บอทหยุดทำงานแล้ว{duration_note} ────────\n"
-                            )
+                            activity = "หยุดส่งหัวใจแล้ว" if finished_mode == "hearts" else "บอทหยุดทำงานแล้ว"
+                            self._append_log(f"──────── {activity}{duration_note} ────────\n")
+                        elif return_code == 0:
+                            if finished_mode == "hearts" and self._heart_sent_count is not None:
+                                status = f"ส่งหัวใจแล้ว {self._heart_sent_count} คน"
+                            else:
+                                status = "ส่งหัวใจเสร็จแล้ว" if finished_mode == "hearts" else "หยุดแล้ว"
+                            self._set_status(status, "success" if finished_mode == "hearts" else "idle")
+                            duration_note = f" • ใช้เวลา {elapsed_text}" if elapsed_text else ""
+                            activity = "ส่งหัวใจเสร็จแล้ว" if finished_mode == "hearts" else "บอทหยุดทำงานแล้ว"
+                            self._append_log(f"──────── {activity}{duration_note} ────────\n")
                         else:
-                            self._set_status("บอทหยุดด้วยข้อผิดพลาด", "error")
+                            status = "ส่งหัวใจไม่สำเร็จ" if finished_mode == "hearts" else "บอทหยุดด้วยข้อผิดพลาด"
+                            self._set_status(status, "error")
                             duration_note = f" • ใช้เวลา {elapsed_text}" if elapsed_text else ""
                             self._append_log(
                                 f"──────── กระบวนการจบ (รหัส {return_code}){duration_note} ────────\n"
@@ -675,6 +734,7 @@ class CookieRunBotGUI:
                     self.connection_test_running = False
                     self.test_button.configure(state="normal")
                     self.start_button.configure(state="normal")
+                    self.send_hearts_button.configure(state="normal")
                     self._append_log(output)
                     if return_code == 0:
                         self._set_status("เชื่อมต่อสำเร็จ", "success")
@@ -689,6 +749,7 @@ class CookieRunBotGUI:
 
     def _set_running_controls(self, running):
         self.start_button.configure(state="disabled" if running else "normal")
+        self.send_hearts_button.configure(state="disabled" if running else "normal")
         self.stop_button.configure(state="normal" if running else "disabled")
         self.test_button.configure(state="disabled" if running else "normal")
         state = "disabled" if running else "normal"
@@ -830,9 +891,10 @@ class CookieRunBotGUI:
 
     def _on_close(self):
         running = self.process is not None and self.process.poll() is None
+        running_activity = "การส่งหัวใจ" if self.process_mode == "hearts" else "บอท"
         if running and not messagebox.askyesno(
             "ปิดโปรแกรม",
-            "บอทยังทำงานอยู่ ต้องการหยุดบอทและปิดโปรแกรมหรือไม่?",
+            f"{running_activity}ยังทำงานอยู่ ต้องการหยุดและปิดโปรแกรมหรือไม่?",
             parent=self.root,
         ):
             return

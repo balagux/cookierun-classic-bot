@@ -21,7 +21,7 @@ if _worker_log_path:
     except OSError:
         _worker_log_stream = None
 
-from bot import BOOST_CHOICES, main as run_bot
+from bot import BOOST_CHOICES, main as run_bot, send_friend_hearts
 from config import DEVICE_IP, DEVICE_PORT
 
 
@@ -46,6 +46,7 @@ def build_parser():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--console", action="store_true", help="run with the original terminal prompts")
     mode.add_argument("--run-bot", action="store_true", help=argparse.SUPPRESS)
+    mode.add_argument("--send-hearts", action="store_true", help=argparse.SUPPRESS)
     mode.add_argument("--check-connection", action="store_true", help=argparse.SUPPRESS)
     mode.add_argument("--check-ocr-runtime", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--device-ip", default=DEVICE_IP)
@@ -107,6 +108,17 @@ def main(argv=None):
             return 0
         except Exception as exc:
             print(f"❌ OCR runtime self-test failed: {exc}")
+            return 1
+
+    if args.send_hearts:
+        try:
+            send_friend_hearts(
+                device_ip=args.device_ip,
+                device_port=args.device_port,
+            )
+            return 0
+        except Exception as exc:
+            print(f"❌ Sending hearts stopped safely: {exc}")
             return 1
 
     if args.console:

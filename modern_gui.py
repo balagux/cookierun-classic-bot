@@ -171,6 +171,13 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             draw.line((p(10), p(27), p(54), p(27)), fill=color, width=width)
             draw.line((p(21), p(8), p(21), p(20)), fill=color, width=width)
             draw.line((p(43), p(8), p(43), p(20)), fill=color, width=width)
+        elif name == "heart":
+            draw.polygon(
+                ((p(32), p(54)), (p(11), p(34)), (p(9), p(20)), (p(16), p(11)),
+                 (p(27), p(11)), (p(32), p(18)), (p(37), p(11)), (p(48), p(11)),
+                 (p(55), p(20)), (p(53), p(34))),
+                fill=color,
+            )
         return image
 
     def _create_app_icon(self):
@@ -189,6 +196,7 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             "xp": ("xp", "#F15F86", 16),
             "tap": ("tap", "#2E9F78", 16),
             "calendar": ("calendar", "#7B8197", 15),
+            "heart": ("heart", "#FFFFFF", 17),
         }
         for key, (shape, color, display_size) in icon_specs.items():
             source = self._draw_icon(shape, color)
@@ -327,7 +335,20 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             command=self._stop_bot,
             state="disabled",
         )
-        self.stop_button.pack(fill="x", padx=12, pady=(7, 12))
+        self.stop_button.pack(fill="x", padx=12, pady=(7, 7))
+        self.send_hearts_button = ctk.CTkButton(
+            run_panel,
+            height=39,
+            corner_radius=11,
+            text="ส่งหัวใจ",
+            image=self.icons["heart"],
+            fg_color="#2E9F78",
+            hover_color="#38AD85",
+            text_color="#FFFFFF",
+            font=self._font(11, "bold"),
+            command=self._send_hearts,
+        )
+        self.send_hearts_button.pack(fill="x", padx=12, pady=(0, 12))
         repeat = ctk.CTkFrame(run_panel, fg_color="transparent")
         repeat.pack(fill="x", padx=13)
         ctk.CTkLabel(repeat, text="จำนวนรอบ", text_color="#C1C4D3", font=self._font(10)).pack(side="left")

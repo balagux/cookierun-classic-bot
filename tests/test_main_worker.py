@@ -33,6 +33,48 @@ class MainWorkerTests(unittest.TestCase):
             )
         )
 
+    def test_send_hearts_mode_calls_one_shot_worker(self):
+        with mock.patch.object(
+            self.main_module,
+            "send_friend_hearts",
+            return_value=4,
+        ) as send_hearts:
+            exit_code = self.main_module.main(
+                [
+                    "--send-hearts",
+                    "--device-ip",
+                    "127.0.0.9",
+                    "--device-port",
+                    "5566",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        send_hearts.assert_called_once_with(
+            device_ip="127.0.0.9",
+            device_port=5566,
+        )
+
+    def test_send_hearts_exception_returns_error_instead_of_escaping(self):
+        with (
+            mock.patch.object(
+                self.main_module,
+                "send_friend_hearts",
+                side_effect=RuntimeError("open the leaderboard"),
+            ),
+            mock.patch("builtins.print") as output,
+        ):
+            exit_code = self.main_module.main(["--send-hearts"])
+
+        self.assertEqual(exit_code, 1)
+        self.assertTrue(
+            any(
+                "Sending hearts stopped safely" in str(call.args[0])
+                and "open the leaderboard" in str(call.args[0])
+                for call in output.call_args_list
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

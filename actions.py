@@ -21,7 +21,6 @@ from config import (
     ALL_LIVES_RECEIVED_AND_SENT_REGION,
     ALL_LIVES_RECEIVED_AND_SENT_TEMPLATE,
     CLOSE_ANNOUNCEMENT_DIALOG_BUTTON,
-    CLOSE_SEND_LIFE_DIALOG_BUTTON,
     COMPLETE_FINISH_BUTTON,
     CONFIRM_SEND_LIFE_BUTTON,
     CONFIRM_SEND_LIFE_REGION,
@@ -36,6 +35,7 @@ from config import (
     EXIT_PARTY_RUN_MODE_BUTTON,
     FAST_START_ITEM,
     FAST_START_USE_BUTTON,
+    FRIEND_ACKNOWLEDGEMENT_REGION,
     FRIEND_BOTTOM_LEADERBOARD_REGION,
     FRIEND_BOTTOM_LEADERBOARD_TEMPLATE,
     FRIEND_SEND_LIFE_REGION,
@@ -43,7 +43,6 @@ from config import (
     FRIEND_TOP_LEADERBOARD_REGION,
     FRIEND_TOP_LEADERBOARD_TEMPLATE,
     INACTIVE_RELOAD_BUTTON,
-    LEADERBOARD_BOTTOM_POSITION,
     LEADERBOARD_TOP_POSITION,
     MAIL_BOX_BUTTON,
     MAIL_BOX_LIVES_TAB_BUTTON,
@@ -74,8 +73,15 @@ from config import (
     CONNECTION_LOST_RELOAD_BUTTON,
     STAGE_GAME_RELAY_REGION,
     STAGE_GAME_RELAY_TEMPLATE,
+    STAGE_MAINMENU_REGION,
+    STAGE_MAINMENU_TEMPLATE,
 )
-from detection import detect_templates, detect_anti_bot_odd_cards, detect_stage
+from detection import (
+    detect_all_template_matches,
+    detect_templates,
+    detect_anti_bot_odd_cards,
+    detect_stage,
+)
 from config import (
     ANTI_BOT_CARD_POS_1, ANTI_BOT_CARD_POS_2, ANTI_BOT_CARD_POS_3,
     ANTI_BOT_CARD_POS_4, ANTI_BOT_CARD_POS_5, ANTI_BOT_CARD_POS_6,
@@ -511,46 +517,473 @@ def handle_inactive():
     time.sleep(3.0)
 
 
-def handle_send_friend_life():
-    print("💌 Handling Send Friend Life...")
-    screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
-    # Scroll leaderboard to top stop when find the "FRIEND LEADERBOARD" template
-    while True:
-        if detect_templates(screen, FRIEND_TOP_LEADERBOARD_TEMPLATE, FRIEND_TOP_LEADERBOARD_REGION):
-            print("✅ Top of Friend Leaderboard reached.")
+def _is_active_friend_life_button(screen, match):
+    """Reject grey/disabled envelopes that still resemble the active template."""
+    if screen is None or not hasattr(screen, "shape") or len(match) != 4:
+        return False
+    x, y, width, height = (int(value) for value in match)
+    screen_height, screen_width = screen.shape[:2]
+    x1, x2 = max(0, x), min(screen_width, x + width)
+    y1, y2 = max(0, y), min(screen_height, y + height)
+    roi = screen[y1:y2, x1:x2]
+    if roi.size == 0:
+        return False
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    active_green = cv2.inRange(hsv, (34, 90, 70), (50, 255, 255))
+    return cv2.countNonZero(active_green) / active_green.size >= 0.25
+
+
+def _same_friend_button(match, target_match, tolerance=28):
+    x, y, width, height = match
+    target_x, target_y, target_width, target_height = target_match
+    center = (x + width // 2, y + height // 2)
+    target_center = (
+        target_x + target_width // 2,
+        target_y + target_height // 2,
+    )
+    return (
+        abs(center[0] - target_center[0]) <= tolerance
+        and abs(center[1] - target_center[1]) <= tolerance
+    )
+
+
+def _friend_match_mean_brightness(screen, match):
+    if screen is None or not hasattr(screen, "shape") or len(match) != 4:
+        return 0.0
+    x, y, width, height = (int(value) for value in match)
+    screen_height, screen_width = screen.shape[:2]
+    roi = screen[
+        max(0, y):min(screen_height, y + height),
+        max(0, x):min(screen_width, x + width),
+    ]
+    if roi.size == 0:
+        return 0.0
+    return float(cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)[:, :, 2].mean())
+
+
+def _is_undimmed_friend_leaderboard(
+    screen,
+    header_matches,
+    top_matches,
+    heart_matches,
+    bottom_matches,
+):
+    """Distinguish the live list from grayscale matches behind a dark modal."""
+    # The Friends tab header is fixed outside the scrolling rows and remains
+    # visible at ranks 1 through 202. Requiring that specific area to be bright
+    # prevents a green modal button from brightening a row crop underneath it.
+    return bool(header_matches) and any(
+        _friend_match_mean_brightness(screen, match) >= 175.0
+        for match in header_matches
+    )
+
+
+def _detect_friend_acknowledgement_button(screen):
+    """Return a large green post-send acknowledgement button, if visible.
+
+    The leaderboard's normal green row buttons are only about 111px wide and
+    must never qualify. The post-send button uses the game's large dialog
+    shape (roughly 290x101px).
+    """
+    if screen is None or not hasattr(screen, "shape"):
+        return None
+    x1, y1, x2, y2 = FRIEND_ACKNOWLEDGEMENT_REGION
+    roi = screen[y1:y2, x1:x2]
+    if roi.size == 0:
+        return None
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    green = cv2.inRange(hsv, (32, 80, 75), (52, 255, 255))
+    green = cv2.morphologyEx(
+        green,
+        cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)),
+    )
+    contours, _ = cv2.findContours(
+        green,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE,
+    )
+    candidates = []
+    for contour in contours:
+        x, y, width, height = cv2.boundingRect(contour)
+        contour_area = float(cv2.contourArea(contour))
+        bounding_area = width * height
+        fill_ratio = contour_area / bounding_area if bounding_area else 0.0
+        if (
+            180 <= width <= 430
+            and 55 <= height <= 140
+            and contour_area >= 6000
+            and fill_ratio >= 0.30
+        ):
+            candidates.append(
+                (contour_area, (x + x1, y + y1, width, height))
+            )
+    if not candidates:
+        return None
+    return max(candidates, key=lambda candidate: candidate[0])[1]
+
+
+def handle_send_friend_life(
+    *,
+    capture_func=None,
+    detect_func=None,
+    tap_func=None,
+    scroll_func=None,
+    sleep_func=None,
+    active_button_func=None,
+    acknowledgement_detector_func=None,
+    max_top_scrolls=96,
+    max_list_scrolls=160,
+    max_heart_sends=250,
+    max_total_iterations=600,
+    heart_tap_attempts=2,
+    confirm_poll_attempts=8,
+    confirm_tap_attempts=2,
+    list_return_poll_attempts=4,
+    acknowledgement_poll_attempts=8,
+    settle_poll_attempts=8,
+):
+    """Send each visible active friend heart once, recapturing after every tap.
+
+    The caller must already have the Friends leaderboard open.  Every loop is
+    deliberately bounded so pressing the GUI action on another screen cannot
+    leave an endless scroll or click worker running.
+    """
+    capture_func = capture_func or (
+        lambda: device_capture_screen(DEVICE_IP, DEVICE_PORT)
+    )
+    detect_func = detect_func or detect_all_template_matches
+    tap_func = tap_func or (
+        lambda x, y: device_tap(DEVICE_IP, DEVICE_PORT, x, y)
+    )
+    scroll_func = scroll_func or (
+        lambda x, y, direction, distance, duration: safe_device_scroll(
+            DEVICE_IP,
+            DEVICE_PORT,
+            x,
+            y,
+            direction=direction,
+            distance=distance,
+            duration=duration,
+        )
+    )
+    sleep_func = sleep_func or time.sleep
+    active_button_func = active_button_func or _is_active_friend_life_button
+    acknowledgement_detector_func = (
+        acknowledgement_detector_func
+        or _detect_friend_acknowledgement_button
+    )
+
+    def capture_or_raise():
+        current_screen = capture_func()
+        if current_screen is None:
+            raise RuntimeError("Could not capture the LDPlayer screen.")
+        return current_screen
+
+    def matches(current_screen, template_files, region):
+        return list(detect_func(current_screen, template_files, region) or [])
+
+    def active_hearts(current_screen):
+        candidates = matches(
+            current_screen,
+            FRIEND_SEND_LIFE_TEMPLATE,
+            FRIEND_SEND_LIFE_REGION,
+        )
+        return sorted(
+            (
+                match
+                for match in candidates
+                if active_button_func(current_screen, match)
+            ),
+            key=lambda match: (match[1], match[0]),
+        )
+
+    def leaderboard_evidence(current_screen):
+        """Return list matches without relying on one specific scroll offset."""
+        return (
+            matches(
+                current_screen,
+                STAGE_MAINMENU_TEMPLATE,
+                STAGE_MAINMENU_REGION,
+            ),
+            matches(
+                current_screen,
+                FRIEND_TOP_LEADERBOARD_TEMPLATE,
+                FRIEND_TOP_LEADERBOARD_REGION,
+            ),
+            matches(
+                current_screen,
+                FRIEND_SEND_LIFE_TEMPLATE,
+                FRIEND_SEND_LIFE_REGION,
+            ),
+            matches(
+                current_screen,
+                FRIEND_BOTTOM_LEADERBOARD_TEMPLATE,
+                FRIEND_BOTTOM_LEADERBOARD_REGION,
+            ),
+        )
+
+    def has_ready_leaderboard(current_screen):
+        evidence = leaderboard_evidence(current_screen)
+        return any(evidence) and _is_undimmed_friend_leaderboard(
+            current_screen,
+            *evidence,
+        )
+
+    print("💌 Sending hearts from the Friends leaderboard...")
+    screen = capture_or_raise()
+    if not has_ready_leaderboard(screen):
+        raise RuntimeError(
+            "Friends leaderboard not detected. Open the leaderboard screen "
+            "with the green heart envelopes, then press Send Hearts again."
+        )
+
+    # Start at rank 1 so a run covers all 202 friends. Both gesture endpoints
+    # stay inside the real row viewport (about y=270..630), even with jitter.
+    for top_scroll_count in range(max(0, int(max_top_scrolls)) + 1):
+        if not has_ready_leaderboard(screen):
+            raise RuntimeError(
+                "The Friends leaderboard became unavailable while scrolling "
+                "to the top. No hearts were sent."
+            )
+        if matches(
+            screen,
+            FRIEND_TOP_LEADERBOARD_TEMPLATE,
+            FRIEND_TOP_LEADERBOARD_REGION,
+        ):
+            print("✅ Top of Friends leaderboard found.")
             break
-        print("🔄 Scrolling up to find Send Friend Life...")
-        safe_device_scroll(DEVICE_IP, DEVICE_PORT, LEADERBOARD_BOTTOM_POSITION[0], LEADERBOARD_BOTTOM_POSITION[1], direction="down", distance=300, duration=150)
-        time.sleep(random.uniform(0.8, 1.4))
-        screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
-    # Scroll down, tap all send life buttons, stop when bottom leaderboard detected
-    no_button_scroll_count = 0
+        if top_scroll_count >= max(0, int(max_top_scrolls)):
+            raise RuntimeError(
+                "Could not reach the top of the Friends leaderboard after "
+                f"{top_scroll_count} scrolls. No hearts were sent."
+            )
+        scroll_func(
+            LEADERBOARD_TOP_POSITION[0],
+            LEADERBOARD_TOP_POSITION[1],
+            "down",
+            150,
+            150,
+        )
+        sleep_func(0.3)
+        screen = capture_or_raise()
+
+    sent_count = 0
+    list_scroll_count = 0
+    total_iteration_count = 0
+    sent_centers_since_scroll = []
     while True:
-        screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
-        if detect_templates(screen, FRIEND_BOTTOM_LEADERBOARD_TEMPLATE, FRIEND_BOTTOM_LEADERBOARD_REGION):
-            print("✅ Bottom of Friend Leaderboard reached. Done sending lives.")
-            break
-        send_life_button_coords = detect_templates(screen, FRIEND_SEND_LIFE_TEMPLATE, FRIEND_SEND_LIFE_REGION)
-        if send_life_button_coords:
-            no_button_scroll_count = 0
-            for x, y, w, h in send_life_button_coords:
-                print("💌 Sending life to friend...")
-                safe_device_tap(DEVICE_IP, DEVICE_PORT, x + w // 2, y + h // 2)
-                time.sleep(random.uniform(0.8, 1.4))
-                print("💌 Confirming send life...")
-                safe_device_tap(DEVICE_IP, DEVICE_PORT, CONFIRM_SEND_LIFE_BUTTON[0], CONFIRM_SEND_LIFE_BUTTON[1])
-                time.sleep(random.uniform(0.8, 1.4))
-                print("💌 Closing send life dialog...")
-                safe_device_tap(DEVICE_IP, DEVICE_PORT, CLOSE_SEND_LIFE_DIALOG_BUTTON[0], CLOSE_SEND_LIFE_DIALOG_BUTTON[1])
-                time.sleep(random.uniform(0.8, 1.4))
-        else:
-            no_button_scroll_count += 1
-            if no_button_scroll_count >= 30:
-                print("⚠️ No send life buttons found for 30 consecutive scrolls. Giving up.")
-                break
-            print(f"🔄 No send life buttons found, scrolling down... ({no_button_scroll_count}/30)")
-            safe_device_scroll(DEVICE_IP, DEVICE_PORT, LEADERBOARD_TOP_POSITION[0], LEADERBOARD_TOP_POSITION[1], direction="up", distance=70, duration=150)
-            time.sleep(random.uniform(0.8, 1.4))
+        total_iteration_count += 1
+        if total_iteration_count > max(1, int(max_total_iterations)):
+            raise RuntimeError(
+                "The Friends leaderboard safety limit was reached after "
+                f"{sent_count} confirmed heart(s)."
+            )
+        if not has_ready_leaderboard(screen):
+            raise RuntimeError(
+                "The Friends leaderboard is covered or no longer ready. "
+                f"Stopped safely after {sent_count} confirmed heart(s)."
+            )
+        heart_matches = active_hearts(screen)
+        if heart_matches:
+            if sent_count >= max(0, int(max_heart_sends)):
+                raise RuntimeError(
+                    "The maximum heart-send safety limit was reached "
+                    f"({max(0, int(max_heart_sends))})."
+                )
+            # Only use one coordinate from this screenshot. The UI is captured
+            # again before selecting the next friend so stale rows are never used.
+            target = heart_matches[0]
+            target_x, target_y, target_width, target_height = target
+            target_center = (
+                target_x + target_width // 2,
+                target_y + target_height // 2,
+            )
+            if any(
+                abs(target_center[0] - old_center[0]) <= 28
+                and abs(target_center[1] - old_center[1]) <= 28
+                for old_center in sent_centers_since_scroll
+            ):
+                raise RuntimeError(
+                    "A previously sent heart button reappeared before the "
+                    f"list moved. Stopped safely after {sent_count} heart(s)."
+                )
+            confirm_matches = []
+            for heart_attempt in range(1, max(1, int(heart_tap_attempts)) + 1):
+                print(
+                    f"💌 Opening heart #{sent_count + 1} "
+                    f"(attempt {heart_attempt}/{max(1, int(heart_tap_attempts))})..."
+                )
+                tap_func(*target_center)
+                for _ in range(max(1, int(confirm_poll_attempts))):
+                    sleep_func(0.15)
+                    screen = capture_or_raise()
+                    confirm_matches = matches(
+                        screen,
+                        CONFIRM_SEND_LIFE_TEMPLATE,
+                        CONFIRM_SEND_LIFE_REGION,
+                    )
+                    if confirm_matches:
+                        break
+                if confirm_matches:
+                    break
+
+            if not confirm_matches:
+                raise RuntimeError(
+                    "The Send Heart confirmation did not appear. Stopped "
+                    f"safely after {sent_count} confirmed heart(s)."
+                )
+
+            confirmation_cleared = False
+            for confirm_attempt in range(
+                1,
+                max(1, int(confirm_tap_attempts)) + 1,
+            ):
+                # Tap the center of the button that was actually detected, not
+                # the old fixed coordinate. Re-detection is required per retry.
+                confirm_x, confirm_y, confirm_width, confirm_height = sorted(
+                    confirm_matches,
+                    key=lambda match: (match[1], match[0]),
+                )[0]
+                print(
+                    f"💌 Confirming heart "
+                    f"({confirm_attempt}/{max(1, int(confirm_tap_attempts))})..."
+                )
+                tap_func(
+                    confirm_x + confirm_width // 2,
+                    confirm_y + confirm_height // 2,
+                )
+                for _ in range(max(1, int(confirm_poll_attempts))):
+                    sleep_func(0.15)
+                    screen = capture_or_raise()
+                    confirm_matches = matches(
+                        screen,
+                        CONFIRM_SEND_LIFE_TEMPLATE,
+                        CONFIRM_SEND_LIFE_REGION,
+                    )
+                    if not confirm_matches:
+                        confirmation_cleared = True
+                        break
+                if confirmation_cleared:
+                    break
+
+            if not confirmation_cleared:
+                raise RuntimeError(
+                    "The Send Heart confirmation did not close. Stopped "
+                    f"after {sent_count} confirmed heart(s)."
+                )
+
+            # Some game versions show a large success acknowledgement after
+            # confirmation. Never tap a guessed coordinate: wait until either
+            # the bright list returns or a large dialog button is detected.
+            leaderboard_returned = False
+            for list_return_attempt in range(
+                max(1, int(list_return_poll_attempts))
+            ):
+                if has_ready_leaderboard(screen):
+                    leaderboard_returned = True
+                    break
+                if list_return_attempt + 1 < max(1, int(list_return_poll_attempts)):
+                    sleep_func(0.15)
+                    screen = capture_or_raise()
+
+            if not leaderboard_returned:
+                acknowledgement_match = None
+                for acknowledgement_attempt in range(
+                    max(1, int(acknowledgement_poll_attempts))
+                ):
+                    acknowledgement_match = acknowledgement_detector_func(screen)
+                    if acknowledgement_match is not None:
+                        break
+                    if acknowledgement_attempt + 1 < max(
+                        1,
+                        int(acknowledgement_poll_attempts),
+                    ):
+                        sleep_func(0.15)
+                        screen = capture_or_raise()
+                if acknowledgement_match is None:
+                    raise RuntimeError(
+                        "The Friends leaderboard stayed dim and no large "
+                        "heart-sent acknowledgement button was detected. "
+                        f"Stopped safely after {sent_count} completed heart(s)."
+                    )
+
+                ack_x, ack_y, ack_width, ack_height = acknowledgement_match
+                print("💌 Closing the detected heart-sent acknowledgement...")
+                tap_func(
+                    ack_x + ack_width // 2,
+                    ack_y + ack_height // 2,
+                )
+                for _ in range(max(1, int(list_return_poll_attempts))):
+                    sleep_func(0.15)
+                    screen = capture_or_raise()
+                    if has_ready_leaderboard(screen):
+                        leaderboard_returned = True
+                        break
+
+            if not leaderboard_returned:
+                raise RuntimeError(
+                    "The Friends leaderboard did not return after confirming "
+                    f"a heart. Stopped safely after {sent_count} completed "
+                    "heart(s)."
+                )
+
+            # A successful send changes/disables that exact envelope. Wait for
+            # the list to settle before counting it or touching another row.
+            target_still_active = True
+            for settle_attempt in range(max(1, int(settle_poll_attempts))):
+                current_hearts = active_hearts(screen)
+                target_still_active = any(
+                    _same_friend_button(match, target) for match in current_hearts
+                )
+                if not target_still_active:
+                    break
+                if settle_attempt + 1 < max(1, int(settle_poll_attempts)):
+                    sleep_func(0.15)
+                    screen = capture_or_raise()
+            if target_still_active:
+                raise RuntimeError(
+                    "The heart button did not change after confirmation. "
+                    f"Stopped safely after {sent_count} confirmed heart(s)."
+                )
+
+            sent_count += 1
+            sent_centers_since_scroll.append(target_center)
+            print(f"✅ Heart sent ({sent_count}).")
+            screen = capture_or_raise()
+            continue
+
+        # Process an active heart on the last row before honoring the bottom
+        # marker. This fixes the previous flow that skipped the final friend.
+        if matches(
+            screen,
+            FRIEND_BOTTOM_LEADERBOARD_TEMPLATE,
+            FRIEND_BOTTOM_LEADERBOARD_REGION,
+        ):
+            print(f"✅ Finished sending hearts. Total sent: {sent_count}")
+            return sent_count
+
+        if list_scroll_count >= max(0, int(max_list_scrolls)):
+            raise RuntimeError(
+                "The bottom of the Friends leaderboard was not found after "
+                f"{list_scroll_count} scrolls. Stopped safely after "
+                f"{sent_count} confirmed heart(s)."
+            )
+        list_scroll_count += 1
+        sent_centers_since_scroll.clear()
+        print(
+            "🔄 Scanning the next Friends leaderboard rows "
+            f"({list_scroll_count}/{max(0, int(max_list_scrolls))})..."
+        )
+        scroll_func(
+            LEADERBOARD_TOP_POSITION[0],
+            LEADERBOARD_TOP_POSITION[1],
+            "up",
+            150,
+            150,
+        )
+        sleep_func(0.3)
+        screen = capture_or_raise()
 
 
 def handle_quick_receive_and_send_lives():
