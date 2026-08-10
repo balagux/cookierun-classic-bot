@@ -42,6 +42,7 @@ class CookieRunBotGUI:
         self.fast_start_var = tk.BooleanVar(value=False)
         self.cookie_relay_var = tk.BooleanVar(value=False)
         self.use_boost_var = tk.BooleanVar(value=False)
+        self.claim_relic_rewards_var = tk.BooleanVar(value=True)
         self.max_runs_var = tk.StringVar(value="0")
         self.status_var = tk.StringVar(value="พร้อมใช้งาน")
         self.session_stats_var = tk.StringVar(
@@ -213,7 +214,7 @@ class CookieRunBotGUI:
         ).pack(anchor="w")
         tk.Label(
             brand_copy,
-            text="CLASSIC  •  v1.4",
+            text="CLASSIC  •  v1.4.1",
             bg="#171a2e",
             fg="#797e9b",
             font=("Segoe UI Semibold", 8),
@@ -375,6 +376,11 @@ class CookieRunBotGUI:
         )
         self.boost_combo.grid(row=0, column=3, sticky="ew")
         self.boost_combo.current(0)
+        ttk.Checkbutton(
+            option_fields,
+            text="รับรางวัล Relic อัตโนมัติ (ปิดเพื่อดองชิ้นส่วน)",
+            variable=self.claim_relic_rewards_var,
+        ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(7, 0))
 
         statistics = make_card(2)
         statistics_header = add_header(
@@ -472,6 +478,8 @@ class CookieRunBotGUI:
             command.append("--cookie-relay")
         if self.use_boost_var.get():
             command.extend(["--boost-index", str(self.boost_combo.current() + 1)])
+        if not self.claim_relic_rewards_var.get():
+            command.append("--keep-relic-parts")
 
     def _launch_process(self, command, mode):
         self._save_settings()
@@ -792,6 +800,9 @@ class CookieRunBotGUI:
             self.fast_start_var.set(bool(settings.get("fast_start", False)))
             self.cookie_relay_var.set(bool(settings.get("cookie_relay", False)))
             self.use_boost_var.set(bool(settings.get("use_boost", False)))
+            self.claim_relic_rewards_var.set(
+                bool(settings.get("claim_relic_rewards", True))
+            )
             self.max_runs_var.set(str(settings.get("max_runs", 0)))
             boost_index = int(settings.get("boost_index", 0))
             self.boost_combo.current(max(0, min(boost_index, len(BOOST_CHOICES) - 1)))
@@ -805,6 +816,7 @@ class CookieRunBotGUI:
             "fast_start": self.fast_start_var.get(),
             "cookie_relay": self.cookie_relay_var.get(),
             "use_boost": self.use_boost_var.get(),
+            "claim_relic_rewards": self.claim_relic_rewards_var.get(),
             "boost_index": max(0, self.boost_combo.current()),
             "max_runs": self.max_runs_var.get().strip() or "0",
         }

@@ -19,6 +19,7 @@ from actions import (
     accept_too_many_treasures,
     close_announcement_dialog,
     close_party_run_mode,
+    close_relic_claim_without_reward,
     complete_finish,
     handle_anti_bot,
     handle_inactive,
@@ -56,6 +57,7 @@ from config import (
     RESULT_REWARD_STABLE_READS,
     RESULT_REWARD_TIMEOUT,
     SESSION_RESET_INTERVAL,
+    STAGE_TEMPLATES,
 )
 from detection import detect_all_template_matches, detect_stage, load_templates
 from debug import save_debug_screen
@@ -79,7 +81,7 @@ BOOST_CHOICES = [
 ]
 
 
-def get_detection_stage_names(group_name):
+def get_detection_stage_names(group_name, claim_relic_rewards=True):
     stage_names = []
     # For non-in-game groups, always stages have higher priority
     if group_name != "IN_GAME":
@@ -95,7 +97,24 @@ def get_detection_stage_names(group_name):
         for stage_name in DETECTION_ALWAYS_STAGES:
             if stage_name not in stage_names:
                 stage_names.append(stage_name)
+    if not claim_relic_rewards:
+        # The red "Get!" button remains visible while completed parts are being
+        # saved. Ignore it so MAINMENU/PURCHASE_ITEM can still drive the bot.
+        stage_names = [name for name in stage_names if name != "RELIC_COMPLETE"]
     return stage_names
+
+
+def get_recovery_stage_names(claim_relic_rewards=True):
+    """All recoverable stages, respecting the keep-parts preference."""
+    stage_names = list(STAGE_TEMPLATES)
+    if not claim_relic_rewards:
+        stage_names.remove("RELIC_COMPLETE")
+    return stage_names
+
+
+def should_claim_relic_rewards(options):
+    """Preserve the historical auto-claim default when the option is absent."""
+    return bool(options.get("claim_relic_rewards", True))
 
 
 def should_quick_exit_after_relay(options):
@@ -110,6 +129,7 @@ def prompt_user_options():
     use_fast_start = input("⚡ Use Fast Start (buy + use)? [y/n]: ").strip().lower() == "y"
     use_cookie_relay = input("🍪 Use Cookie Relay (buy + use)? [y/n]: ").strip().lower() == "y"
     use_desired_random_boost = input("🎲 Use Desired Random Boost (buy + use)? [y/n]: ").strip().lower() == "y"
+    claim_relic_rewards = input("🏺 Claim completed Relic rewards? [Y/n]: ").strip().lower() != "n"
     if use_desired_random_boost:
         print("  Select desired boost (must match the boost option configured in-game):")
         for i, (name, _) in enumerate(BOOST_CHOICES, 1):
@@ -130,6 +150,7 @@ def prompt_user_options():
         "use_desired_random_boost": use_desired_random_boost,
         "desired_boost_template": desired_boost_template,
         "desired_boost_name": desired_boost_name if use_desired_random_boost else None,
+        "claim_relic_rewards": claim_relic_rewards,
     }
 
 
@@ -293,6 +314,11 @@ def main(options=None, device_ip=None, device_port=None):
 
         if options is None:
             options = prompt_user_options()
+        claim_relic_rewards = should_claim_relic_rewards(options)
+        print(
+            "🏺 Completed Relic rewards: "
+            + ("auto-claim enabled" if claim_relic_rewards else "keep parts; do not claim")
+        )
 
         last_stage = None
         is_first_game = True
@@ -318,10 +344,21 @@ def main(options=None, device_ip=None, device_port=None):
                 last_stage = None
                 last_detected_time = time.time()
                 continue
-            stage = detect_stage(device_screen, get_detection_stage_names(detection_group))
+            stage = detect_stage(
+                device_screen,
+                get_detection_stage_names(
+                    detection_group,
+                    claim_relic_rewards=claim_relic_rewards,
+                ),
+            )
             if stage is None:
                 if time.time() - last_detected_time >= DETECTION_RECOVERY_SCAN_INTERVAL[detection_group]:
-                    stage = detect_stage(device_screen)
+                    stage = detect_stage(
+                        device_screen,
+                        get_recovery_stage_names(
+                            claim_relic_rewards=claim_relic_rewards,
+                        ),
+                    )
                     last_detected_time = time.time()
             else:
                 last_detected_time = time.time()
@@ -574,12 +611,18 @@ def main(options=None, device_ip=None, device_port=None):
                 last_stage = None
             elif stage == "RELIC_COMPLETE":
                 print("🏺 Detected Stage: RELIC_COMPLETE")
-                open_relic_complete()
+                if claim_relic_rewards:
+                    open_relic_complete()
+                else:
+                    print("🏺 Relic auto-claim is off; completed parts were left untouched.")
                 detection_group = "PRE_GAME"
                 last_stage = None
             elif stage == "RELIC_CLAIM":
                 print("🏺 Detected Stage: RELIC_CLAIM")
-                accept_relic_claim()
+                if claim_relic_rewards:
+                    accept_relic_claim()
+                else:
+                    close_relic_claim_without_reward()
                 detection_group = "PRE_GAME"
                 last_stage = None
             elif stage == "PARTY_RUN":

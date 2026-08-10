@@ -84,7 +84,8 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             "sidebar_outer_width": sidebar_width + sidebar_scrollbar_width,
             "content_width": content_width,
             "narrow_controls": content_width < 500,
-            "boost_combo_row": 3 if content_width < 500 else 1,
+            "relic_switch_row": 3 if content_width < 500 else 1,
+            "boost_combo_row": 4 if content_width < 500 else 2,
             "stack_settings": True,
             "summary_columns": 2,
         }
@@ -497,6 +498,12 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             command=self._toggle_boost,
             **switch_args,
         )
+        relic_reward_switch = ctk.CTkSwitch(
+            option_row,
+            text="รับ Relic อัตโนมัติ (ปิด = ดองชิ้นส่วน)",
+            variable=self.claim_relic_rewards_var,
+            **switch_args,
+        )
         if self.narrow_controls:
             fast_start_switch.grid(row=0, column=0, columnspan=3, sticky="w")
             cookie_relay_switch.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
@@ -505,6 +512,13 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             fast_start_switch.grid(row=0, column=0, sticky="w", padx=(0, 8))
             cookie_relay_switch.grid(row=0, column=1, sticky="w", padx=(0, 8))
             random_boost_switch.grid(row=0, column=2, sticky="w")
+        relic_reward_switch.grid(
+            row=self.layout["relic_switch_row"],
+            column=0,
+            columnspan=3,
+            sticky="w",
+            pady=(6, 0),
+        )
         self.boost_combo = BoostOptionMenu(
             option_row,
             height=36,

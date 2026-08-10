@@ -159,32 +159,120 @@ def is_boost_selection_checked(screen, selection_button):
     return cv2.countNonZero(green_mask) >= 80
 
 
+def checked_boost_selection_names(screen):
+    """Return every boost currently carrying a green check mark."""
+    return {
+        name
+        for name, button in RANDOM_BOOST_SELECTION_BUTTONS.items()
+        if is_boost_selection_checked(screen, button)
+    }
+
+
+def _set_boost_selection_state(
+    boost_name,
+    checked,
+    *,
+    capture_func=None,
+    tap_func=None,
+    sleep_func=None,
+    max_attempts=3,
+):
+    """Toggle one Multi-Buy row until its visual check state matches."""
+    selection_button = RANDOM_BOOST_SELECTION_BUTTONS.get(boost_name)
+    if selection_button is None:
+        return False
+    capture_func = capture_func or (
+        lambda: device_capture_screen(DEVICE_IP, DEVICE_PORT)
+    )
+    tap_func = tap_func or (
+        lambda x, y: device_tap(DEVICE_IP, DEVICE_PORT, x, y)
+    )
+    sleep_func = sleep_func or time.sleep
+
+    for attempt in range(1, max(1, int(max_attempts)) + 1):
+        screen = capture_func()
+        if is_boost_selection_checked(screen, selection_button) is checked:
+            return True
+        action = "check" if checked else "uncheck"
+        print(f"🎯 Tapping {boost_name} to {action} it ({attempt}/{max_attempts})...")
+        tap_func(selection_button[0], selection_button[1])
+        # Wait for the visual state to settle before another tap. Retapping too
+        # early can undo the first toggle on a laggy LDPlayer instance.
+        for _ in range(4):
+            sleep_func(0.2)
+            screen = capture_func()
+            if is_boost_selection_checked(screen, selection_button) is checked:
+                return True
+
+    screen = capture_func()
+    return is_boost_selection_checked(screen, selection_button) is checked
+
+
+def sync_desired_boost_selection(
+    desired_name,
+    *,
+    capture_func=None,
+    tap_func=None,
+    sleep_func=None,
+):
+    """Leave exactly the GUI-selected boost checked in the Multi-Buy dialog."""
+    if desired_name not in RANDOM_BOOST_SELECTION_BUTTONS:
+        print(f"❌ No selection coordinate configured for boost: {desired_name}")
+        return False
+    capture_func = capture_func or (
+        lambda: device_capture_screen(DEVICE_IP, DEVICE_PORT)
+    )
+    tap_func = tap_func or (
+        lambda x, y: device_tap(DEVICE_IP, DEVICE_PORT, x, y)
+    )
+    sleep_func = sleep_func or time.sleep
+
+    checked_names = checked_boost_selection_names(capture_func())
+    stale_names = [
+        name
+        for name in RANDOM_BOOST_SELECTION_BUTTONS
+        if name != desired_name and name in checked_names
+    ]
+    for stale_name in stale_names:
+        print(f"🔄 Unchecking previous boost: {stale_name}...")
+        if not _set_boost_selection_state(
+            stale_name,
+            False,
+            capture_func=capture_func,
+            tap_func=tap_func,
+            sleep_func=sleep_func,
+        ):
+            print(f"❌ Could not remove the old check mark: {stale_name}")
+            return False
+
+    if not _set_boost_selection_state(
+        desired_name,
+        True,
+        capture_func=capture_func,
+        tap_func=tap_func,
+        sleep_func=sleep_func,
+    ):
+        print(f"❌ Could not confirm the check mark for boost: {desired_name}")
+        return False
+
+    final_checked_names = checked_boost_selection_names(capture_func())
+    if final_checked_names != {desired_name}:
+        print(
+            "❌ Boost selection did not settle to exactly one option: "
+            f"{sorted(final_checked_names)}"
+        )
+        return False
+    return True
+
+
 def purchase_desired_random_boost(desired_template, desired_name):
     print("🛒 Purchasing Desired Random Boost...")
     safe_device_tap(DEVICE_IP, DEVICE_PORT, RANDOM_BOOST_ITEM[0], RANDOM_BOOST_ITEM[1])
     time.sleep(random.uniform(0.8, 1.4))
     safe_device_tap(DEVICE_IP, DEVICE_PORT, MULTI_PURCHASE_BUTTON[0], MULTI_PURCHASE_BUTTON[1])
     time.sleep(random.uniform(1, 2))
-    selection_button = RANDOM_BOOST_SELECTION_BUTTONS.get(desired_name)
-    if selection_button is None:
-        print(f"❌ No selection coordinate configured for boost: {desired_name}")
-        return
-    print(f"🎯 Selecting desired boost: {desired_name}...")
-    selection_confirmed = False
-    for attempt in range(1, 4):
-        screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
-        if is_boost_selection_checked(screen, selection_button):
-            selection_confirmed = True
-            break
-        print(f"🎯 Tapping boost option ({attempt}/3)...")
-        device_tap(DEVICE_IP, DEVICE_PORT, selection_button[0], selection_button[1])
-        time.sleep(0.9)
-        screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
-        if is_boost_selection_checked(screen, selection_button):
-            selection_confirmed = True
-            break
-    if not selection_confirmed:
-        print(f"❌ Could not confirm the check mark for boost: {desired_name}")
+    print(f"🎯 Syncing desired boost: {desired_name}...")
+    if not sync_desired_boost_selection(desired_name):
         print("⚠️ Multi-Buy was not pressed, so no Coins were spent accidentally.")
         safe_device_tap(
             DEVICE_IP,
@@ -194,7 +282,7 @@ def purchase_desired_random_boost(desired_template, desired_name):
         )
         time.sleep(0.8)
         return
-    print(f"✅ Boost option checked: {desired_name}")
+    print(f"✅ Only the selected boost is checked: {desired_name}")
     safe_device_tap(DEVICE_IP, DEVICE_PORT, MULTI_BUY_BUTTON[0], MULTI_BUY_BUTTON[1])
     time.sleep(random.uniform(0.8, 1.4))
     print(f"🔍 Waiting for desired boost to be detected: {desired_name}...")
@@ -367,6 +455,18 @@ def accept_relic_claim():
     time.sleep(random.uniform(0.8, 1.4))
     safe_device_tap(DEVICE_IP, DEVICE_PORT, RELIC_CLOSE_BUTTON[0], RELIC_CLOSE_BUTTON[1])
     time.sleep(1.0)
+
+
+def close_relic_claim_without_reward():
+    """Close an already-open Relic dialog without consuming completed parts."""
+    print("🏺 Keeping completed Relic parts — closing without claiming...")
+    safe_device_tap(
+        DEVICE_IP,
+        DEVICE_PORT,
+        RELIC_CLOSE_BUTTON[0],
+        RELIC_CLOSE_BUTTON[1],
+    )
+    time.sleep(0.8)
 
 
 def handle_anti_bot(screen):
