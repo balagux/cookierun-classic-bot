@@ -53,6 +53,7 @@ def build_parser():
     parser.add_argument("--device-port", type=int, default=DEVICE_PORT)
     parser.add_argument("--fast-start", action="store_true")
     parser.add_argument("--cookie-relay", action="store_true")
+    parser.add_argument("--wait-relay-death", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--boost-index", type=int, choices=range(0, len(BOOST_CHOICES) + 1), default=0)
     parser.add_argument("--keep-relic-parts", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--max-runs", type=int, default=0, help=argparse.SUPPRESS)
@@ -64,6 +65,7 @@ def _options_from_args(args):
     return {
         "use_fast_start": args.fast_start,
         "use_cookie_relay": args.cookie_relay,
+        "quick_exit_after_relay": not args.wait_relay_death,
         "use_desired_random_boost": boost is not None,
         "desired_boost_template": boost[1] if boost else None,
         "desired_boost_name": boost[0] if boost else None,

@@ -165,36 +165,28 @@ class FriendHeartTests(unittest.TestCase):
         self.assertEqual(taps, [])
         self.assertEqual(scrolls, [])
 
-    def test_top_search_is_bounded_before_any_heart_is_tapped(self):
+    def test_starts_at_current_position_without_rewinding_to_rank_one(self):
         leaderboard = _FriendLeaderboard()
 
-        def never_find_top(_screen, templates, _region):
-            if templates == actions.STAGE_MAINMENU_TEMPLATE:
-                return [leaderboard.main_match]
-            if templates == actions.FRIEND_SEND_LIFE_TEMPLATE:
-                return [leaderboard.first_heart]
-            return []
+        def detect_without_top(screen, templates, region):
+            if templates == actions.FRIEND_TOP_LEADERBOARD_TEMPLATE:
+                return []
+            return leaderboard.detect(screen, templates, region)
 
-        with self.assertRaisesRegex(RuntimeError, "after 3 scrolls"):
-            actions.handle_send_friend_life(
-                capture_func=leaderboard.capture,
-                detect_func=never_find_top,
-                tap_func=leaderboard.tap,
-                scroll_func=leaderboard.scroll,
-                sleep_func=lambda _seconds: None,
-                active_button_func=lambda _screen, _match: True,
-                max_top_scrolls=3,
-            )
+        sent_count = actions.handle_send_friend_life(
+            capture_func=leaderboard.capture,
+            detect_func=detect_without_top,
+            tap_func=leaderboard.tap,
+            scroll_func=leaderboard.scroll,
+            sleep_func=lambda _seconds: None,
+            active_button_func=lambda _screen, _match: True,
+            max_top_scrolls=3,
+        )
 
-        self.assertEqual(leaderboard.taps, [])
-        self.assertEqual(len(leaderboard.scrolls), 3)
-        for _x, y, _direction, distance, _duration in leaderboard.scrolls:
-            # safe_device_scroll may add up to 15px of jitter before applying
-            # y +/- distance; both endpoints must remain inside the row list.
-            self.assertGreaterEqual(y - 15 - distance, 270)
-            self.assertLessEqual(y + 15 + distance, 630)
+        self.assertEqual(sent_count, 2)
+        self.assertEqual(leaderboard.scrolls, [])
 
-    def test_rank_107_reaches_top_with_safe_long_swipes(self):
+    def test_rank_107_moves_only_toward_lower_ranks(self):
         screen = np.full((720, 1280, 3), 225, dtype=np.uint8)
         rank = 107
         scrolls = []
@@ -202,33 +194,32 @@ class FriendHeartTests(unittest.TestCase):
         def detect_rank(_screen, templates, _region):
             if templates == actions.STAGE_MAINMENU_TEMPLATE:
                 return [_FriendLeaderboard.main_match]
-            if templates == actions.FRIEND_TOP_LEADERBOARD_TEMPLATE and rank == 1:
-                return [_FriendLeaderboard.top_match]
-            if templates == actions.FRIEND_BOTTOM_LEADERBOARD_TEMPLATE and rank == 1:
+            if templates == actions.FRIEND_BOTTOM_LEADERBOARD_TEMPLATE and rank >= 199:
                 return [_FriendLeaderboard.bottom_match]
             return []
 
-        def scroll_to_top(x, y, direction, distance, duration):
+        def scroll_to_bottom(x, y, direction, distance, duration):
             nonlocal rank
             scrolls.append((x, y, direction, distance, duration))
-            self.assertEqual(direction, "down")
-            rank = max(1, rank - 3)
+            self.assertEqual(direction, "up")
+            rank = min(202, rank + 3)
 
         sent_count = actions.handle_send_friend_life(
             capture_func=lambda: screen,
             detect_func=detect_rank,
             tap_func=lambda _x, _y: self.fail("no tap expected"),
-            scroll_func=scroll_to_top,
+            scroll_func=scroll_to_bottom,
             sleep_func=lambda _seconds: None,
+            movement_detector_func=lambda _before, _after: True,
         )
 
         self.assertEqual(sent_count, 0)
-        self.assertEqual(rank, 1)
-        self.assertEqual(len(scrolls), 36)
+        self.assertGreaterEqual(rank, 199)
+        self.assertEqual(len(scrolls), 31)
         for _x, y, _direction, distance, _duration in scrolls:
-            self.assertEqual((y, distance), (447, 150))
-            self.assertGreaterEqual(y - 15 - distance, 270)
-            self.assertLessEqual(y + 15 + distance, 630)
+            self.assertEqual((y, distance, _duration), (447, 90, 400))
+            self.assertGreaterEqual(y - distance, 270)
+            self.assertLessEqual(y + distance, 630)
 
     def test_default_list_bound_reaches_friend_202(self):
         screen = np.full((720, 1280, 3), 225, dtype=np.uint8)
@@ -256,13 +247,17 @@ class FriendHeartTests(unittest.TestCase):
             tap_func=lambda _x, _y: self.fail("no tap expected"),
             scroll_func=scroll_to_bottom,
             sleep_func=lambda _seconds: None,
+            movement_detector_func=lambda _before, _after: True,
         )
 
         self.assertEqual(sent_count, 0)
         self.assertGreaterEqual(rank, 199)
         self.assertLessEqual(len(scrolls), 160)
         self.assertTrue(
-            all(y == 447 and distance == 150 for _x, y, _d, distance, _t in scrolls)
+            all(
+                y == 447 and distance == 90 and duration == 400
+                for _x, y, _direction, distance, duration in scrolls
+            )
         )
 
     def test_dim_overlay_after_scroll_fails_before_another_action(self):
@@ -286,7 +281,7 @@ class FriendHeartTests(unittest.TestCase):
             scrolls.append(args)
             overlay_visible = True
 
-        with self.assertRaisesRegex(RuntimeError, "covered or no longer ready"):
+        with self.assertRaisesRegex(RuntimeError, "left the Friends leaderboard"):
             actions.handle_send_friend_life(
                 capture_func=capture,
                 detect_func=detect_list,
@@ -484,7 +479,7 @@ class FriendHeartTests(unittest.TestCase):
 
         self.assertEqual(leaderboard.taps, [])
 
-    def test_total_iteration_guard_bounds_a_nonprogressing_list(self):
+    def test_unchanged_list_retries_once_then_stops_safely(self):
         leaderboard = _FriendLeaderboard(success_popup=False)
 
         def detect_no_progress(_screen, templates, _region):
@@ -494,7 +489,7 @@ class FriendHeartTests(unittest.TestCase):
                 return [leaderboard.top_match]
             return []
 
-        with self.assertRaisesRegex(RuntimeError, "safety limit was reached"):
+        with self.assertRaisesRegex(RuntimeError, "did not move"):
             actions.handle_send_friend_life(
                 capture_func=leaderboard.capture,
                 detect_func=detect_no_progress,
@@ -505,7 +500,114 @@ class FriendHeartTests(unittest.TestCase):
             )
 
         self.assertEqual(leaderboard.taps, [])
+        self.assertEqual(len(leaderboard.scrolls), 2)
+
+    def test_unsettled_list_stops_before_another_swipe_or_tap(self):
+        leaderboard = _FriendLeaderboard(success_popup=False)
+
+        def detect_no_hearts(_screen, templates, _region):
+            if templates == actions.STAGE_MAINMENU_TEMPLATE:
+                return [leaderboard.main_match]
+            if templates == actions.FRIEND_TOP_LEADERBOARD_TEMPLATE:
+                return [leaderboard.top_match]
+            return []
+
+        with self.assertRaisesRegex(RuntimeError, "did not settle"):
+            actions.handle_send_friend_life(
+                capture_func=leaderboard.capture,
+                detect_func=detect_no_hearts,
+                tap_func=leaderboard.tap,
+                scroll_func=leaderboard.scroll,
+                sleep_func=lambda _seconds: None,
+                stability_detector_func=lambda _before, _after: False,
+                scroll_settle_poll_attempts=3,
+            )
+
+        self.assertEqual(leaderboard.taps, [])
         self.assertEqual(len(leaderboard.scrolls), 1)
+
+    def test_new_bottom_marker_counts_as_progress_without_a_second_swipe(self):
+        leaderboard = _FriendLeaderboard(success_popup=False)
+        at_bottom = False
+
+        def detect_bottom_after_scroll(_screen, templates, _region):
+            if templates == actions.STAGE_MAINMENU_TEMPLATE:
+                return [leaderboard.main_match]
+            if templates == actions.FRIEND_BOTTOM_LEADERBOARD_TEMPLATE and at_bottom:
+                return [leaderboard.bottom_match]
+            return []
+
+        def reach_bottom(*args):
+            nonlocal at_bottom
+            leaderboard.scrolls.append(args)
+            at_bottom = True
+
+        sent_count = actions.handle_send_friend_life(
+            capture_func=leaderboard.capture,
+            detect_func=detect_bottom_after_scroll,
+            tap_func=leaderboard.tap,
+            scroll_func=reach_bottom,
+            sleep_func=lambda _seconds: None,
+            movement_detector_func=lambda _before, _after: False,
+            stability_detector_func=lambda _before, _after: True,
+        )
+
+        self.assertEqual(sent_count, 0)
+        self.assertEqual(leaderboard.taps, [])
+        self.assertEqual(len(leaderboard.scrolls), 1)
+
+    def test_new_heart_counts_as_progress_without_skipping_its_row(self):
+        leaderboard = _FriendLeaderboard(success_popup=False)
+        state = "empty"
+
+        def capture():
+            return leaderboard.dimmed_screen if state == "confirm" else leaderboard.bright_screen
+
+        def detect_heart_after_scroll(_screen, templates, _region):
+            if templates == actions.STAGE_MAINMENU_TEMPLATE:
+                return [leaderboard.main_match] if state != "confirm" else []
+            if templates == actions.FRIEND_SEND_LIFE_TEMPLATE and state == "heart":
+                return [leaderboard.first_heart]
+            if templates == actions.CONFIRM_SEND_LIFE_TEMPLATE and state == "confirm":
+                return [leaderboard.confirm_match]
+            if templates == actions.FRIEND_BOTTOM_LEADERBOARD_TEMPLATE and state == "bottom":
+                return [leaderboard.bottom_match]
+            return []
+
+        def tap(x, y):
+            nonlocal state
+            point = (x, y)
+            leaderboard.taps.append(point)
+            if state == "heart" and point == leaderboard._center(leaderboard.first_heart):
+                state = "confirm"
+            elif state == "confirm" and point == leaderboard._center(leaderboard.confirm_match):
+                state = "bottom"
+
+        def reveal_heart(*args):
+            nonlocal state
+            leaderboard.scrolls.append(args)
+            state = "heart"
+
+        sent_count = actions.handle_send_friend_life(
+            capture_func=capture,
+            detect_func=detect_heart_after_scroll,
+            tap_func=tap,
+            scroll_func=reveal_heart,
+            sleep_func=lambda _seconds: None,
+            active_button_func=lambda _screen, _match: True,
+            movement_detector_func=lambda _before, _after: False,
+            stability_detector_func=lambda _before, _after: True,
+        )
+
+        self.assertEqual(sent_count, 1)
+        self.assertEqual(len(leaderboard.scrolls), 1)
+        self.assertEqual(
+            leaderboard.taps,
+            [
+                leaderboard._center(leaderboard.first_heart),
+                leaderboard._center(leaderboard.confirm_match),
+            ],
+        )
 
     def test_green_gate_rejects_a_grey_disabled_envelope(self):
         active_screen = np.zeros((100, 160, 3), dtype=np.uint8)
@@ -548,6 +650,42 @@ class FriendHeartTests(unittest.TestCase):
         # The small green row crossing the old fixed point around (645, 463)
         # is normal leaderboard UI, not a large acknowledgement button.
         self.assertIsNone(actions._detect_friend_acknowledgement_button(screen))
+
+    def test_real_friend_screenshot_movement_check_ignores_identical_frame(self):
+        screenshot_path = (
+            Path(actions.__file__).resolve().parent
+            / "debug_screens"
+            / "after_quick_result_ok.png"
+        )
+        screen = cv2.imread(str(screenshot_path))
+        self.assertIsNotNone(screen)
+
+        moved = screen.copy()
+        x1 = actions.FRIEND_TOP_LEADERBOARD_REGION[0] + 20
+        x2 = actions.FRIEND_SEND_LIFE_REGION[0] - 10
+        y1 = actions.FRIEND_SEND_LIFE_REGION[1] + 30
+        y2 = actions.FRIEND_SEND_LIFE_REGION[3] - 35
+        moved[y1:y2, x1:x2] = np.roll(
+            moved[y1:y2, x1:x2],
+            -90,
+            axis=0,
+        )
+
+        animated = screen.copy()
+        animated_x1 = actions.FRIEND_TOP_LEADERBOARD_REGION[0] + 95
+        animated_x2 = actions.FRIEND_TOP_LEADERBOARD_REGION[0] + 255
+        animated[y1:y2, animated_x1:animated_x2] = np.roll(
+            animated[y1:y2, animated_x1:animated_x2],
+            -25,
+            axis=0,
+        )
+
+        self.assertFalse(actions._friend_list_has_moved(screen, screen.copy()))
+        self.assertTrue(actions._friend_list_has_moved(screen, moved))
+        self.assertFalse(actions._friend_list_has_moved(screen, animated))
+        self.assertTrue(actions._friend_list_is_stable(screen, screen.copy()))
+        self.assertFalse(actions._friend_list_is_stable(screen, moved))
+        self.assertTrue(actions._friend_list_is_stable(screen, animated))
 
     def test_large_green_acknowledgement_is_detected_by_shape(self):
         leaderboard = _FriendLeaderboard()

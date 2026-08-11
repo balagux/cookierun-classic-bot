@@ -119,8 +119,15 @@ def should_claim_relic_rewards(options):
 
 
 def should_quick_exit_after_relay(options):
-    """Quick-exit whenever Cookie Relay automation is enabled."""
-    return bool(options.get("use_cookie_relay"))
+    """Return whether Cookie Relay should end the run as soon as cookie two starts.
+
+    The missing-option default keeps the historical quick-exit behaviour for
+    console launches and settings files created before the toggle existed.
+    """
+    return bool(
+        options.get("use_cookie_relay")
+        and options.get("quick_exit_after_relay", True)
+    )
 
 
 def prompt_user_options():
@@ -509,6 +516,7 @@ def main(options=None, device_ip=None, device_port=None):
                         relay_quick_exit_pending = quick_exit_after_cookie_relay()
                         last_stage = None
                     else:
+                        print("🏃 Relay quick-exit is off — waiting for cookie two to die naturally.")
                         using_cookie_relay()
                 detection_group = "POST_GAME" if relay_quick_exit_pending else "IN_GAME"
                 last_stage = None

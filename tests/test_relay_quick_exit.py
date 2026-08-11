@@ -17,6 +17,21 @@ class RelayQuickExitTests(unittest.TestCase):
             should_quick_exit_after_relay({"use_cookie_relay": False})
         )
 
+    def test_can_wait_for_the_second_cookie_to_die_naturally(self):
+        self.assertFalse(
+            should_quick_exit_after_relay(
+                {
+                    "use_cookie_relay": True,
+                    "quick_exit_after_relay": False,
+                }
+            )
+        )
+
+    def test_old_options_keep_quick_exit_enabled_by_default(self):
+        self.assertTrue(
+            should_quick_exit_after_relay({"use_cookie_relay": True})
+        )
+
     def test_waits_for_relay_to_disappear_then_taps_pause_and_quit(self):
         with (
             mock.patch.object(actions.time, "monotonic", side_effect=(0.0, 1.0)),

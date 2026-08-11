@@ -5,6 +5,45 @@ import adb
 
 
 class AdbResetTests(unittest.TestCase):
+    def test_deterministic_scroll_uses_exact_requested_coordinates(self):
+        completed = mock.Mock(returncode=0, stdout="", stderr="")
+        with (
+            mock.patch.object(adb, "_resolve_device_target", return_value="emulator-5556"),
+            mock.patch.object(adb, "adb_run", return_value=completed) as adb_command,
+        ):
+            adb.device_scroll(
+                "127.0.0.1",
+                5556,
+                435,
+                447,
+                direction="up",
+                distance=150,
+                duration=150,
+            )
+
+        command = adb_command.call_args.args[0]
+        self.assertEqual(
+            command[-6:],
+            ["swipe", "435", "597", "435", "297", "150"],
+        )
+
+    def test_deterministic_scroll_propagates_an_adb_failure(self):
+        failed = mock.Mock(returncode=1, stdout="", stderr="device offline")
+        with (
+            mock.patch.object(adb, "_resolve_device_target", return_value="emulator-5556"),
+            mock.patch.object(adb, "adb_run", return_value=failed),
+            self.assertRaisesRegex(RuntimeError, "device offline"),
+        ):
+            adb.device_scroll(
+                "127.0.0.1",
+                5556,
+                435,
+                447,
+                direction="up",
+                distance=90,
+                duration=400,
+            )
+
     def test_reset_uses_short_health_check_instead_of_old_ninety_second_wait(self):
         completed = mock.Mock(returncode=0, stdout="", stderr="")
         with (

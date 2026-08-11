@@ -42,6 +42,7 @@ class CookieRunBotGUI:
         self.port_var = tk.StringVar(value=str(DEVICE_PORT))
         self.fast_start_var = tk.BooleanVar(value=False)
         self.cookie_relay_var = tk.BooleanVar(value=False)
+        self.relay_quick_exit_var = tk.BooleanVar(value=True)
         self.use_boost_var = tk.BooleanVar(value=False)
         self.claim_relic_rewards_var = tk.BooleanVar(value=True)
         self.max_runs_var = tk.StringVar(value="0")
@@ -231,7 +232,7 @@ class CookieRunBotGUI:
         ).pack(anchor="w")
         tk.Label(
             brand_copy,
-            text="CLASSIC  •  v1.4.2",
+            text="CLASSIC  •  v1.4.3",
             bg="#171a2e",
             fg="#797e9b",
             font=("Segoe UI Semibold", 8),
@@ -402,9 +403,14 @@ class CookieRunBotGUI:
         self.boost_combo.current(0)
         ttk.Checkbutton(
             option_fields,
+            text="ออกเร็วหลังไม้ 2 (ปิด = รอจนตาย)",
+            variable=self.relay_quick_exit_var,
+        ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(7, 0))
+        ttk.Checkbutton(
+            option_fields,
             text="รับรางวัล Relic อัตโนมัติ (ปิดเพื่อดองชิ้นส่วน)",
             variable=self.claim_relic_rewards_var,
-        ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(7, 0))
+        ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(7, 0))
 
         statistics = make_card(2)
         statistics_header = add_header(
@@ -506,7 +512,10 @@ class CookieRunBotGUI:
             return
 
         self._heart_sent_count = None
-        self._append_log("\nส่งหัวใจ: กรุณาเปิดรายชื่อเพื่อนบนหน้าหลักไว้ก่อน\n")
+        self._append_log(
+            "\nส่งหัวใจ: เปิดหน้า Friends แล้วเลื่อนไปจุดเริ่ม "
+            "(เริ่มอันดับ 1 หากต้องการส่งครบ)\n"
+        )
         self._launch_process(command, "hearts")
 
     def _append_play_options(self, command):
@@ -514,6 +523,8 @@ class CookieRunBotGUI:
             command.append("--fast-start")
         if self.cookie_relay_var.get():
             command.append("--cookie-relay")
+        if self.cookie_relay_var.get() and not self.relay_quick_exit_var.get():
+            command.append("--wait-relay-death")
         if self.use_boost_var.get():
             command.extend(["--boost-index", str(self.boost_combo.current() + 1)])
         if not self.claim_relic_rewards_var.get():
@@ -860,6 +871,9 @@ class CookieRunBotGUI:
             self.port_var.set(str(settings.get("device_port", DEVICE_PORT)))
             self.fast_start_var.set(bool(settings.get("fast_start", False)))
             self.cookie_relay_var.set(bool(settings.get("cookie_relay", False)))
+            self.relay_quick_exit_var.set(
+                bool(settings.get("relay_quick_exit", True))
+            )
             self.use_boost_var.set(bool(settings.get("use_boost", False)))
             self.claim_relic_rewards_var.set(
                 bool(settings.get("claim_relic_rewards", True))
@@ -876,6 +890,7 @@ class CookieRunBotGUI:
             "device_port": self.port_var.get().strip(),
             "fast_start": self.fast_start_var.get(),
             "cookie_relay": self.cookie_relay_var.get(),
+            "relay_quick_exit": self.relay_quick_exit_var.get(),
             "use_boost": self.use_boost_var.get(),
             "claim_relic_rewards": self.claim_relic_rewards_var.get(),
             "boost_index": max(0, self.boost_combo.current()),

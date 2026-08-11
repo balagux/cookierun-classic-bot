@@ -33,6 +33,26 @@ class MainWorkerTests(unittest.TestCase):
             )
         )
 
+    def test_wait_relay_death_disables_only_the_quick_exit(self):
+        args = self.main_module.build_parser().parse_args(
+            ["--run-bot", "--cookie-relay", "--wait-relay-death"]
+        )
+
+        options = self.main_module._options_from_args(args)
+
+        self.assertTrue(options["use_cookie_relay"])
+        self.assertFalse(options["quick_exit_after_relay"])
+
+    def test_relay_quick_exit_remains_enabled_without_the_new_flag(self):
+        args = self.main_module.build_parser().parse_args(
+            ["--run-bot", "--cookie-relay"]
+        )
+
+        options = self.main_module._options_from_args(args)
+
+        self.assertTrue(options["use_cookie_relay"])
+        self.assertTrue(options["quick_exit_after_relay"])
+
     def test_send_hearts_mode_calls_one_shot_worker(self):
         with mock.patch.object(
             self.main_module,

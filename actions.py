@@ -3,7 +3,7 @@ import time
 
 import cv2
 
-from adb import device_capture_screen, device_tap, safe_device_scroll, safe_device_tap
+from adb import device_capture_screen, device_scroll, device_tap, safe_device_tap
 from config import (
     ACCEPT_ALL_LIVES_RECEIVED_AND_SENT_BUTTON,
     ACCEPT_CONGRATULATIONS_BUTTON,
@@ -343,8 +343,8 @@ def _wait_for_quit_button(region, timeout=QUIT_BUTTON_WAIT_TIMEOUT):
 
 
 def quick_exit_after_cookie_relay():
-    """Wait for cookie two to run out, then leave through Pause -> Quit."""
-    print("🏃 Waiting for the second cookie to run out...")
+    """Wait for cookie two to start running, then leave through Pause -> Quit."""
+    print("🏃 Waiting for the second cookie to start running...")
     started_at = time.monotonic()
     time.sleep(RELAY_QUICK_EXIT_MIN_WAIT)
     while time.monotonic() - started_at < RELAY_QUICK_EXIT_TIMEOUT:
@@ -561,6 +561,69 @@ def _friend_match_mean_brightness(screen, match):
     return float(cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)[:, :, 2].mean())
 
 
+def _friend_list_change_ratio(before_screen, after_screen):
+    """Measure visual change in static rank/name/score bands.
+
+    The two narrow bands deliberately exclude the animated cookie/pet artwork
+    and the green send buttons. That keeps idle character animation from
+    looking like list motion while preserving enough text to detect a swipe.
+    """
+    if (
+        before_screen is None
+        or after_screen is None
+        or not hasattr(before_screen, "shape")
+        or not hasattr(after_screen, "shape")
+        or before_screen.shape != after_screen.shape
+    ):
+        return 1.0
+
+    screen_height, screen_width = before_screen.shape[:2]
+    y1 = max(0, FRIEND_SEND_LIFE_REGION[1] + 30)
+    y2 = min(screen_height, FRIEND_SEND_LIFE_REGION[3] - 35)
+    rank_x1 = max(0, FRIEND_TOP_LEADERBOARD_REGION[0] + 20)
+    rank_x2 = min(screen_width, FRIEND_TOP_LEADERBOARD_REGION[0] + 85)
+    text_x1 = max(0, FRIEND_TOP_LEADERBOARD_REGION[0] + 270)
+    text_x2 = min(screen_width, FRIEND_SEND_LIFE_REGION[0] - 10)
+    if (
+        rank_x2 <= rank_x1
+        or text_x2 <= text_x1
+        or y2 <= y1
+    ):
+        return 1.0
+
+    before_roi = cv2.hconcat(
+        [
+            before_screen[y1:y2, rank_x1:rank_x2],
+            before_screen[y1:y2, text_x1:text_x2],
+        ]
+    )
+    after_roi = cv2.hconcat(
+        [
+            after_screen[y1:y2, rank_x1:rank_x2],
+            after_screen[y1:y2, text_x1:text_x2],
+        ]
+    )
+    if before_roi.size == 0 or after_roi.size == 0:
+        return 1.0
+
+    before_gray = cv2.cvtColor(before_roi, cv2.COLOR_BGR2GRAY)
+    after_gray = cv2.cvtColor(after_roi, cv2.COLOR_BGR2GRAY)
+    before_gray = cv2.GaussianBlur(before_gray, (5, 5), 0)
+    after_gray = cv2.GaussianBlur(after_gray, (5, 5), 0)
+    changed = cv2.absdiff(before_gray, after_gray) >= 18
+    return float(changed.mean())
+
+
+def _friend_list_has_moved(before_screen, after_screen):
+    """Return whether friend names/scores visibly moved after a swipe."""
+    return _friend_list_change_ratio(before_screen, after_screen) >= 0.06
+
+
+def _friend_list_is_stable(before_screen, after_screen):
+    """Return whether consecutive friend-list captures have stopped moving."""
+    return _friend_list_change_ratio(before_screen, after_screen) <= 0.015
+
+
 def _is_undimmed_friend_leaderboard(
     screen,
     header_matches,
@@ -632,6 +695,8 @@ def handle_send_friend_life(
     sleep_func=None,
     active_button_func=None,
     acknowledgement_detector_func=None,
+    movement_detector_func=None,
+    stability_detector_func=None,
     max_top_scrolls=96,
     max_list_scrolls=160,
     max_heart_sends=250,
@@ -642,6 +707,8 @@ def handle_send_friend_life(
     list_return_poll_attempts=4,
     acknowledgement_poll_attempts=8,
     settle_poll_attempts=8,
+    scroll_attempts=2,
+    scroll_settle_poll_attempts=6,
 ):
     """Send each visible active friend heart once, recapturing after every tap.
 
@@ -657,7 +724,7 @@ def handle_send_friend_life(
         lambda x, y: device_tap(DEVICE_IP, DEVICE_PORT, x, y)
     )
     scroll_func = scroll_func or (
-        lambda x, y, direction, distance, duration: safe_device_scroll(
+        lambda x, y, direction, distance, duration: device_scroll(
             DEVICE_IP,
             DEVICE_PORT,
             x,
@@ -673,6 +740,8 @@ def handle_send_friend_life(
         acknowledgement_detector_func
         or _detect_friend_acknowledgement_button
     )
+    movement_detector_func = movement_detector_func or _friend_list_has_moved
+    stability_detector_func = stability_detector_func or _friend_list_is_stable
 
     def capture_or_raise():
         current_screen = capture_func()
@@ -730,7 +799,7 @@ def handle_send_friend_life(
             *evidence,
         )
 
-    print("💌 Sending hearts from the Friends leaderboard...")
+    print("💌 Sending hearts from the current Friends leaderboard position...")
     screen = capture_or_raise()
     if not has_ready_leaderboard(screen):
         raise RuntimeError(
@@ -738,35 +807,11 @@ def handle_send_friend_life(
             "with the green heart envelopes, then press Send Hearts again."
         )
 
-    # Start at rank 1 so a run covers all 202 friends. Both gesture endpoints
-    # stay inside the real row viewport (about y=270..630), even with jitter.
-    for top_scroll_count in range(max(0, int(max_top_scrolls)) + 1):
-        if not has_ready_leaderboard(screen):
-            raise RuntimeError(
-                "The Friends leaderboard became unavailable while scrolling "
-                "to the top. No hearts were sent."
-            )
-        if matches(
-            screen,
-            FRIEND_TOP_LEADERBOARD_TEMPLATE,
-            FRIEND_TOP_LEADERBOARD_REGION,
-        ):
-            print("✅ Top of Friends leaderboard found.")
-            break
-        if top_scroll_count >= max(0, int(max_top_scrolls)):
-            raise RuntimeError(
-                "Could not reach the top of the Friends leaderboard after "
-                f"{top_scroll_count} scrolls. No hearts were sent."
-            )
-        scroll_func(
-            LEADERBOARD_TOP_POSITION[0],
-            LEADERBOARD_TOP_POSITION[1],
-            "down",
-            150,
-            150,
-        )
-        sleep_func(0.3)
-        screen = capture_or_raise()
+    # Start exactly where the user opened the list. Rewinding to rank 1 first
+    # caused many visually confusing swipes (especially when the list resumed
+    # near rank 100). From here onward the only gesture is upward, toward lower
+    # ranks. ``max_top_scrolls`` remains accepted for launcher compatibility.
+    del max_top_scrolls
 
     sent_count = 0
     list_scroll_count = 0
@@ -969,21 +1014,88 @@ def handle_send_friend_life(
                 f"{list_scroll_count} scrolls. Stopped safely after "
                 f"{sent_count} confirmed heart(s)."
             )
-        list_scroll_count += 1
+        before_scroll_screen = screen
+        list_moved = False
+        for scroll_attempt in range(max(1, min(2, int(scroll_attempts)))):
+            if list_scroll_count >= max(0, int(max_list_scrolls)):
+                raise RuntimeError(
+                    "The bottom of the Friends leaderboard was not found after "
+                    f"{list_scroll_count} scrolls. Stopped safely after "
+                    f"{sent_count} confirmed heart(s)."
+                )
+            list_scroll_count += 1
+            print(
+                "🔄 Scanning the next Friends leaderboard rows "
+                f"({list_scroll_count}/{max(0, int(max_list_scrolls))})..."
+            )
+            # ``device_scroll`` measures distance from the center to each end,
+            # so 90px here is an exact 180px gesture. The slower 400ms swipe
+            # avoids inertia that previously caused stacked, erratic scrolling.
+            scroll_func(
+                LEADERBOARD_TOP_POSITION[0],
+                LEADERBOARD_TOP_POSITION[1],
+                "up",
+                90,
+                400,
+            )
+            sleep_func(0.15)
+            previous_settle_screen = capture_or_raise()
+            if not has_ready_leaderboard(previous_settle_screen):
+                raise RuntimeError(
+                    "The screen left the Friends leaderboard after scrolling. "
+                    f"Stopped safely after {sent_count} confirmed heart(s)."
+                )
+
+            candidate_screen = previous_settle_screen
+            list_settled = False
+            for _ in range(max(1, int(scroll_settle_poll_attempts))):
+                sleep_func(0.12)
+                candidate_screen = capture_or_raise()
+                if not has_ready_leaderboard(candidate_screen):
+                    raise RuntimeError(
+                        "The screen left the Friends leaderboard while the "
+                        "list was settling. Stopped safely after "
+                        f"{sent_count} confirmed heart(s)."
+                    )
+                if stability_detector_func(
+                    previous_settle_screen,
+                    candidate_screen,
+                ):
+                    list_settled = True
+                    break
+                previous_settle_screen = candidate_screen
+
+            if not list_settled:
+                raise RuntimeError(
+                    "The Friends list did not settle after scrolling. Stopped "
+                    "before tapping a moving row, after "
+                    f"{sent_count} confirmed heart(s)."
+                )
+            semantic_progress = bool(active_hearts(candidate_screen)) or bool(
+                matches(
+                    candidate_screen,
+                    FRIEND_BOTTOM_LEADERBOARD_TEMPLATE,
+                    FRIEND_BOTTOM_LEADERBOARD_REGION,
+                )
+            )
+            if semantic_progress or movement_detector_func(
+                before_scroll_screen,
+                candidate_screen,
+            ):
+                screen = candidate_screen
+                list_moved = True
+                break
+            screen = candidate_screen
+            if scroll_attempt == 0 and max(1, min(2, int(scroll_attempts))) > 1:
+                print("⚠️ Friends list did not move; retrying once...")
+
+        if not list_moved:
+            raise RuntimeError(
+                "The Friends list did not move after one controlled retry, "
+                "and the bottom marker was not detected. Stopped safely after "
+                f"{sent_count} confirmed heart(s)."
+            )
         sent_centers_since_scroll.clear()
-        print(
-            "🔄 Scanning the next Friends leaderboard rows "
-            f"({list_scroll_count}/{max(0, int(max_list_scrolls))})..."
-        )
-        scroll_func(
-            LEADERBOARD_TOP_POSITION[0],
-            LEADERBOARD_TOP_POSITION[1],
-            "up",
-            150,
-            150,
-        )
-        sleep_func(0.3)
-        screen = capture_or_raise()
 
 
 def handle_quick_receive_and_send_lives():

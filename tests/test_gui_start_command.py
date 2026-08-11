@@ -1,5 +1,8 @@
+import json
 import queue
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from gui import CookieRunBotGUI
@@ -12,12 +15,17 @@ class _Value:
     def get(self):
         return self.value
 
+    def set(self, value):
+        self.value = value
+
 
 class _Combo:
     def __init__(self, index):
         self.index = index
 
-    def current(self):
+    def current(self, index=None):
+        if index is not None:
+            self.index = index
         return self.index
 
 
@@ -27,6 +35,7 @@ class GuiStartCommandTests(unittest.TestCase):
         gui.process = None
         gui.fast_start_var = _Value(True)
         gui.cookie_relay_var = _Value(True)
+        gui.relay_quick_exit_var = _Value(True)
         gui.use_boost_var = _Value(True)
         gui.claim_relic_rewards_var = _Value(False)
         gui.max_runs_var = _Value("7")
@@ -43,6 +52,7 @@ class GuiStartCommandTests(unittest.TestCase):
         self.assertEqual(mode, "bot")
         self.assertIn("--fast-start", command)
         self.assertIn("--cookie-relay", command)
+        self.assertNotIn("--wait-relay-death", command)
         self.assertEqual(command[command.index("--boost-index") + 1], "3")
         self.assertEqual(command[command.index("--max-runs") + 1], "7")
         self.assertIn("--keep-relic-parts", command)
@@ -54,6 +64,7 @@ class GuiStartCommandTests(unittest.TestCase):
         gui = object.__new__(CookieRunBotGUI)
         gui.fast_start_var = _Value(False)
         gui.cookie_relay_var = _Value(False)
+        gui.relay_quick_exit_var = _Value(True)
         gui.use_boost_var = _Value(False)
         gui.claim_relic_rewards_var = _Value(True)
         gui.boost_combo = _Combo(0)
@@ -62,6 +73,62 @@ class GuiStartCommandTests(unittest.TestCase):
         gui._append_play_options(command)
 
         self.assertNotIn("--keep-relic-parts", command)
+
+    def test_disabling_relay_quick_exit_waits_for_natural_death(self):
+        gui = object.__new__(CookieRunBotGUI)
+        gui.fast_start_var = _Value(False)
+        gui.cookie_relay_var = _Value(True)
+        gui.relay_quick_exit_var = _Value(False)
+        gui.use_boost_var = _Value(False)
+        gui.claim_relic_rewards_var = _Value(True)
+        gui.boost_combo = _Combo(0)
+        command = []
+
+        gui._append_play_options(command)
+
+        self.assertIn("--cookie-relay", command)
+        self.assertIn("--wait-relay-death", command)
+
+    def test_relay_death_option_is_ignored_when_cookie_relay_is_off(self):
+        gui = object.__new__(CookieRunBotGUI)
+        gui.fast_start_var = _Value(False)
+        gui.cookie_relay_var = _Value(False)
+        gui.relay_quick_exit_var = _Value(False)
+        gui.use_boost_var = _Value(False)
+        gui.claim_relic_rewards_var = _Value(True)
+        gui.boost_combo = _Combo(0)
+        command = []
+
+        gui._append_play_options(command)
+
+        self.assertNotIn("--cookie-relay", command)
+        self.assertNotIn("--wait-relay-death", command)
+
+    def test_relay_quick_exit_setting_defaults_on_and_is_persisted(self):
+        gui = object.__new__(CookieRunBotGUI)
+        gui.ip_var = _Value("127.0.0.1")
+        gui.port_var = _Value("5555")
+        gui.fast_start_var = _Value(False)
+        gui.cookie_relay_var = _Value(False)
+        gui.relay_quick_exit_var = _Value(False)
+        gui.use_boost_var = _Value(False)
+        gui.claim_relic_rewards_var = _Value(True)
+        gui.max_runs_var = _Value("0")
+        gui.boost_combo = _Combo(0)
+        gui._append_log = mock.Mock()
+
+        with tempfile.TemporaryDirectory() as directory:
+            settings_file = Path(directory) / "gui_settings.json"
+            settings_file.write_text("{}", encoding="utf-8")
+            with mock.patch("gui.SETTINGS_FILE", settings_file):
+                gui._load_settings()
+                self.assertTrue(gui.relay_quick_exit_var.get())
+
+                gui.relay_quick_exit_var.set(False)
+                gui._save_settings()
+
+            saved = json.loads(settings_file.read_text(encoding="utf-8"))
+            self.assertFalse(saved["relay_quick_exit"])
 
     def test_send_hearts_uses_separate_worker_without_play_options(self):
         gui = object.__new__(CookieRunBotGUI)

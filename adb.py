@@ -129,25 +129,47 @@ def safe_device_tap(ip: str, port: int, x: int, y: int):
     )
 
 
-def safe_device_scroll(ip: str, port: int, x: int, y: int, direction: str = "up", distance: int = 500, duration: int = 300):
+def device_scroll(ip: str, port: int, x: int, y: int, direction: str = "up", distance: int = 500, duration: int = 300):
+    """Perform a deterministic swipe centered on ``(x, y)``.
+
+    This is intended for UI lists where a small random coordinate change can
+    land on another control or make the scroll look erratic.  Callers that
+    deliberately want human-like jitter can continue using
+    :func:`safe_device_scroll`.
+    """
     target = _resolve_device_target(ip, port)
-    jx = x + random.randint(-15, 15)
-    jy = y + random.randint(-15, 15)
     direction_map = {
-        "up":    (jx, jy + distance, jx, jy - distance),
-        "down":  (jx, jy - distance, jx, jy + distance),
-        "left":  (jx + distance, jy, jx - distance, jy),
-        "right": (jx - distance, jy, jx + distance, jy),
+        "up":    (x, y + distance, x, y - distance),
+        "down":  (x, y - distance, x, y + distance),
+        "left":  (x + distance, y, x - distance, y),
+        "right": (x - distance, y, x + distance, y),
     }
     if direction not in direction_map:
         raise ValueError(f"Invalid direction '{direction}'. Use: up, down, left, right.")
     x1, y1, x2, y2 = direction_map[direction]
-    adb_run(
+    result = adb_run(
         [ADB_EXECUTABLE, "-s", target, "shell", "input", "swipe",
          str(x1), str(y1), str(x2), str(y2), str(duration)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+    )
+    if result.returncode != 0:
+        error = (result.stderr or result.stdout or "unknown ADB error").strip()
+        raise RuntimeError(f"ADB swipe failed: {error}")
+
+
+def safe_device_scroll(ip: str, port: int, x: int, y: int, direction: str = "up", distance: int = 500, duration: int = 300):
+    jx = x + random.randint(-15, 15)
+    jy = y + random.randint(-15, 15)
+    device_scroll(
+        ip,
+        port,
+        jx,
+        jy,
+        direction=direction,
+        distance=distance,
+        duration=duration,
     )
 
 

@@ -84,8 +84,9 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             "sidebar_outer_width": sidebar_width + sidebar_scrollbar_width,
             "content_width": content_width,
             "narrow_controls": content_width < 500,
-            "relic_switch_row": 3 if content_width < 500 else 1,
-            "boost_combo_row": 4 if content_width < 500 else 2,
+            "relay_quick_exit_row": 2 if content_width < 500 else 1,
+            "relic_switch_row": 4 if content_width < 500 else 2,
+            "boost_combo_row": 5 if content_width < 500 else 3,
             "stack_settings": True,
             "summary_columns": 2,
         }
@@ -512,6 +513,12 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             variable=self.cookie_relay_var,
             **switch_args,
         )
+        relay_quick_exit_switch = ctk.CTkSwitch(
+            option_row,
+            text="ออกเร็วหลังไม้ 2 (ปิด = รอจนตาย)",
+            variable=self.relay_quick_exit_var,
+            **switch_args,
+        )
         random_boost_switch = ctk.CTkSwitch(
             option_row,
             text="Random Boost",
@@ -528,11 +535,18 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         if self.narrow_controls:
             fast_start_switch.grid(row=0, column=0, columnspan=3, sticky="w")
             cookie_relay_switch.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
-            random_boost_switch.grid(row=2, column=0, columnspan=3, sticky="w", pady=(4, 0))
+            random_boost_switch.grid(row=3, column=0, columnspan=3, sticky="w", pady=(4, 0))
         else:
             fast_start_switch.grid(row=0, column=0, sticky="w", padx=(0, 8))
             cookie_relay_switch.grid(row=0, column=1, sticky="w", padx=(0, 8))
             random_boost_switch.grid(row=0, column=2, sticky="w")
+        relay_quick_exit_switch.grid(
+            row=self.layout["relay_quick_exit_row"],
+            column=0,
+            columnspan=3,
+            sticky="w",
+            pady=(6, 0),
+        )
         relic_reward_switch.grid(
             row=self.layout["relic_switch_row"],
             column=0,
