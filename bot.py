@@ -62,6 +62,7 @@ from config import (
 )
 from detection import detect_all_template_matches, detect_stage, load_templates
 from debug import save_debug_screen
+from mystery_box_detection import detect_mystery_box_types
 from result_ocr import read_result_rewards
 
 # -------------------
@@ -80,6 +81,166 @@ BOOST_CHOICES = [
     ("Magnetic Aura",           BOOST_MAGNETIC_AURA_TEMPLATE),
     ("2 Pit Lifts",             BOOST_2PIT_LIFTS_TEMPLATE),
 ]
+
+
+class BoxSessionStats:
+    """Track Mystery Boxes from completed runs started by this bot process.
+
+    The post-game Mystery Box dialog can remain visible for several detection
+    loops when a tap is delayed.  ``record_popup`` therefore accepts at most
+    one dialog for each run.  A dialog left open before the bot starts is not
+    eligible because no run has been started and completed yet.
+    """
+
+    BOX_TYPES = ("wood", "silver", "gold", "rainbow", "unknown")
+
+    def __init__(self):
+        self._counts = {box_type: 0 for box_type in self.BOX_TYPES}
+        self._run_started = False
+        self._run_completed = False
+        self._popup_recorded = False
+
+    @property
+    def run_started(self):
+        return self._run_started
+
+    @property
+    def run_completed(self):
+        return self._run_completed
+
+    @property
+    def popup_recorded(self):
+        return self._popup_recorded
+
+    def begin_run(self):
+        """Open a fresh run lifecycle and discard any stale dialog latch."""
+        self._run_started = True
+        self._run_completed = False
+        self._popup_recorded = False
+
+    def complete_run(self):
+        """Allow one Mystery Box dialog after a bot-started run completes."""
+        if not self._run_started:
+            return False
+        self._run_completed = True
+        return True
+
+    def close_run(self):
+        """Close the current lifecycle without changing session totals."""
+        self._run_started = False
+        self._run_completed = False
+        self._popup_recorded = False
+
+    cancel_run = close_run
+
+    def record_popup(self, detected_types):
+        """Record every box on one eligible popup, returning whether it counted.
+
+        An empty detector result means the popup layout was not classified, so
+        it is deliberately not converted to a made-up ``unknown`` box.  Invalid
+        individual labels are preserved as ``unknown`` instead of being lost.
+        """
+        if (
+            not self._run_started
+            or not self._run_completed
+            or self._popup_recorded
+        ):
+            return False
+
+        detected_types = list(detected_types or ())
+        if not detected_types:
+            return False
+
+        for detected_type in detected_types:
+            normalized = str(detected_type).strip().lower()
+            if normalized not in self.BOX_TYPES:
+                normalized = "unknown"
+            self._counts[normalized] += 1
+        self._popup_recorded = True
+        return True
+
+    def snapshot(self):
+        counts = dict(self._counts)
+        counts["total"] = sum(counts.values())
+        return counts
+
+
+def _print_box_stats(box_stats):
+    """Emit one stable, order-preserving Mystery Box statistics line."""
+    counts = box_stats.snapshot()
+    print(
+        f"[BOX_STATS] wood={counts['wood']} silver={counts['silver']} "
+        f"gold={counts['gold']} rainbow={counts['rainbow']} "
+        f"unknown={counts['unknown']} total={counts['total']}"
+    )
+
+
+class RunDurationStats:
+    """Track gameplay time for completed runs using a monotonic clock.
+
+    Timing begins when the bot presses Play and ends when the Result screen is
+    first detected. Result count-up/OCR time is therefore not included.
+    """
+
+    def __init__(self, clock=None):
+        self._clock = clock or time.monotonic
+        self._started_at = None
+        self._pending_seconds = None
+        self.latest_seconds = None
+        self.total_seconds = 0.0
+        self.timed_runs = 0
+
+    @property
+    def in_progress(self):
+        return self._started_at is not None
+
+    def start(self):
+        self._pending_seconds = None
+        self._started_at = self._clock()
+
+    def cancel(self):
+        """Discard an interrupted run without changing completed-run totals."""
+        self._started_at = None
+        self._pending_seconds = None
+
+    def capture(self):
+        """Stop the active clock without counting the run yet."""
+        if self._started_at is None:
+            return None
+        elapsed = max(0.0, self._clock() - self._started_at)
+        self._started_at = None
+        self._pending_seconds = elapsed
+        return elapsed
+
+    def commit(self):
+        """Add a captured run to totals once; repeated calls are harmless."""
+        if self._pending_seconds is None:
+            return None
+        elapsed = self._pending_seconds
+        self._pending_seconds = None
+        self.latest_seconds = elapsed
+        self.total_seconds += elapsed
+        self.timed_runs += 1
+        return elapsed
+
+    def complete(self):
+        """Capture and commit an active or already-captured run exactly once."""
+        self.capture()
+        return self.commit()
+
+
+def _print_session_stats(attempts, completed, coins, exp, run_durations):
+    """Emit one stable, machine-readable session statistics line."""
+    latest_seconds = run_durations.latest_seconds
+    if latest_seconds is None:
+        latest_seconds = 0.0
+    print(
+        f"[STATS] attempts={attempts} completed={completed} "
+        f"coins={coins} exp={exp} "
+        f"last_run_seconds={latest_seconds:.1f} "
+        f"total_run_seconds={run_durations.total_seconds:.1f} "
+        f"timed_runs={run_durations.timed_runs}"
+    )
 
 
 def get_detection_stage_names(group_name, claim_relic_rewards=True):
@@ -371,6 +532,9 @@ def main(options=None, device_ip=None, device_port=None):
         completed_run_count = 0
         session_coins = 0
         session_exp = 0
+        run_durations = RunDurationStats()
+        box_stats = BoxSessionStats()
+        _print_box_stats(box_stats)
 
         while True:
             device_screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
@@ -410,6 +574,11 @@ def main(options=None, device_ip=None, device_port=None):
                 print("🎮 Detected Stage: MAINMENU")
                 quick_exit_return = relay_quick_exit_pending
                 if quick_exit_return:
+                    # Normally the timer stops on GAME_COMPLETE. Some quick-exit
+                    # paths can return directly to Main Menu, so finish it here as
+                    # an idempotent fallback before confirming the completed run.
+                    run_durations.complete()
+                    box_stats.complete_run()
                     relay_quick_exit_pending = False
                     run_in_progress = False
                     completed_run_count += 1
@@ -417,9 +586,12 @@ def main(options=None, device_ip=None, device_port=None):
                     session_exp += int(relay_quick_exit_rewards.get("exp", 0))
                     relay_quick_exit_rewards = {"coins": 0, "exp": 0}
                     print("✅ Relay quick-exit round confirmed at Main Menu.")
-                    print(
-                        f"[STATS] attempts={session_run_count} completed={completed_run_count} "
-                        f"coins={session_coins} exp={session_exp}"
+                    _print_session_stats(
+                        session_run_count,
+                        completed_run_count,
+                        session_coins,
+                        session_exp,
+                        run_durations,
                     )
                 premature_return = (
                     not quick_exit_return
@@ -432,13 +604,22 @@ def main(options=None, device_ip=None, device_port=None):
                         "retrying this run from the normal start sequence."
                     )
                     run_in_progress = False
+                    run_durations.cancel()
+                    box_stats.cancel_run()
                     session_run_count = max(completed_run_count, session_run_count - 1)
                     retry_interrupted_run = True
                     detection_group = "PRE_GAME"
-                    print(
-                        f"[STATS] attempts={session_run_count} completed={completed_run_count} "
-                        f"coins={session_coins} exp={session_exp}"
+                    _print_session_stats(
+                        session_run_count,
+                        completed_run_count,
+                        session_coins,
+                        session_exp,
+                        run_durations,
                     )
+                # MAINMENU is the terminal boundary for the preceding run.  It
+                # also clears eligibility before any stale post-game dialog can
+                # be mistaken for a box collected by that run.
+                box_stats.close_run()
                 # Wait screen refresh
                 refresh_wait = 0.5 if quick_exit_return else 1.0
                 print(f"⏳ Waiting {refresh_wait:.0f} seconds for screen refresh...")
@@ -462,6 +643,10 @@ def main(options=None, device_ip=None, device_port=None):
                     session_reset_interval = random.uniform(*SESSION_RESET_INTERVAL)
                     detection_group = "PRE_GAME"
                     run_in_progress = False
+                    run_durations.cancel()
+                    box_stats.cancel_run()
+                    relay_quick_exit_pending = False
+                    relay_quick_exit_rewards = {"coins": 0, "exp": 0}
                     last_stage = None
                     is_first_game = True
                     continue
@@ -491,12 +676,17 @@ def main(options=None, device_ip=None, device_port=None):
                     purchase_cookie_relay()
                 if options["use_desired_random_boost"]:
                     purchase_desired_random_boost(options["desired_boost_template"], options["desired_boost_name"])
+                run_durations.start()
+                box_stats.begin_run()
                 play_game()
                 run_in_progress = True
                 session_run_count += 1
-                print(
-                    f"[STATS] attempts={session_run_count} completed={completed_run_count} "
-                    f"coins={session_coins} exp={session_exp}"
+                _print_session_stats(
+                    session_run_count,
+                    completed_run_count,
+                    session_coins,
+                    session_exp,
+                    run_durations,
                 )
                 detection_group = "IN_GAME"
                 time.sleep(0.2)
@@ -521,6 +711,27 @@ def main(options=None, device_ip=None, device_port=None):
                 detection_group = "POST_GAME" if relay_quick_exit_pending else "IN_GAME"
                 last_stage = None
             elif stage == "GAME_COMPLETE":
+                # Snapshot the stage duration before reward animation/OCR waits.
+                if relay_quick_exit_pending:
+                    # Quick-exit runs are only counted after Main Menu confirms
+                    # that leaving the Result screen actually succeeded.
+                    completed_duration = run_durations.capture()
+                else:
+                    completed_duration = run_durations.complete()
+                if completed_duration is None and not relay_quick_exit_pending:
+                    print(
+                        "[RUN] GAME_COMPLETE is still visible without an active "
+                        "run timer; retrying OK without counting the run twice."
+                    )
+                    complete_finish()
+                    run_in_progress = False
+                    detection_group = "POST_GAME"
+                    last_stage = None
+                    continue
+                if completed_duration is not None:
+                    box_stats.complete_run()
+                if completed_duration is not None:
+                    print(f"[RUN] Stage completed in {completed_duration:.1f}s.")
                 if relay_quick_exit_pending:
                     try:
                         (
@@ -578,9 +789,12 @@ def main(options=None, device_ip=None, device_port=None):
                 completed_run_count += 1
                 session_coins += int(result_coins or 0)
                 session_exp += int(result_exp or 0)
-                print(
-                    f"[STATS] attempts={session_run_count} completed={completed_run_count} "
-                    f"coins={session_coins} exp={session_exp}"
+                _print_session_stats(
+                    session_run_count,
+                    completed_run_count,
+                    session_coins,
+                    session_exp,
+                    run_durations,
                 )
                 complete_finish()
                 run_in_progress = False
@@ -588,6 +802,30 @@ def main(options=None, device_ip=None, device_port=None):
                 last_stage = None
             elif stage == "MYSTERY_BOX":
                 print("🎁 Detected Stage: MYSTERY_BOX")
+                try:
+                    detected_box_types = detect_mystery_box_types(device_screen)
+                except Exception as exc:
+                    # Box statistics must never prevent the existing reward
+                    # flow from continuing when classification is unavailable.
+                    detected_box_types = []
+                    print(f"[BOX] Mystery Box classification failed: {exc}")
+                if box_stats.record_popup(detected_box_types):
+                    print(
+                        "[BOX] Collected this run: "
+                        + ", ".join(detected_box_types)
+                    )
+                    _print_box_stats(box_stats)
+                elif not detected_box_types:
+                    print(
+                        "[BOX] Popup detected, but no boxes could be classified; "
+                        "totals were left unchanged and a debug image was saved."
+                    )
+                    save_debug_screen(device_screen)
+                elif not box_stats.run_completed:
+                    print(
+                        "[BOX] Ignored a Mystery Box popup that does not belong "
+                        "to a completed run started by this bot."
+                    )
                 accept_mystery_box()
                 time.sleep(0.5)
                 detection_group = "POST_GAME"
@@ -668,6 +906,10 @@ def main(options=None, device_ip=None, device_port=None):
                 close_party_run_mode()
                 detection_group = "PRE_GAME"
                 last_stage = None
+            elif stage == "ANNOUNCEMENT":
+                print("📢 Detected Stage: ANNOUNCEMENT")
+                close_announcement_dialog()
+                last_stage = None
             elif stage == "ANTI_BOT":
                 print("⚠️ Detected Stage: ANTI_BOT")
                 handle_anti_bot(device_screen)
@@ -680,6 +922,10 @@ def main(options=None, device_ip=None, device_port=None):
                 session_reset_interval = random.uniform(*SESSION_RESET_INTERVAL)
                 detection_group = "PRE_GAME"
                 run_in_progress = False
+                run_durations.cancel()
+                box_stats.cancel_run()
+                relay_quick_exit_pending = False
+                relay_quick_exit_rewards = {"coins": 0, "exp": 0}
                 last_stage = None
                 is_first_game = True
             elif stage == "INACTIVE":
