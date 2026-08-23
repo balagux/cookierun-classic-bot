@@ -57,6 +57,21 @@ class CookieRunBotGUI:
         self.session_exp_average_var = tk.StringVar(value="เฉลี่ย 0 / รอบ")
         self.session_elapsed_var = tk.StringVar(value="00:00:00")
         self.session_elapsed_detail_var = tk.StringVar(value="ยังไม่ได้เริ่ม")
+        self.session_last_run_duration_var = tk.StringVar(value="--:--")
+        self.session_average_run_duration_var = tk.StringVar(value="เฉลี่ย --:-- / รอบ")
+        self.box_wood_total_var = tk.StringVar(value="0")
+        self.box_wood_average_var = tk.StringVar(value="เฉลี่ย 0 / รอบ")
+        self.box_silver_total_var = tk.StringVar(value="0")
+        self.box_silver_average_var = tk.StringVar(value="เฉลี่ย 0 / รอบ")
+        self.box_gold_total_var = tk.StringVar(value="0")
+        self.box_gold_average_var = tk.StringVar(value="เฉลี่ย 0 / รอบ")
+        self.box_rainbow_total_var = tk.StringVar(value="0")
+        self.box_rainbow_average_var = tk.StringVar(value="เฉลี่ย 0 / รอบ")
+        self.box_total_var = tk.StringVar(value="0")
+        self.box_total_average_var = tk.StringVar(value="เฉลี่ย 0 / รอบ")
+        self.box_unknown_detail_var = tk.StringVar(value="ยังไม่พบกล่องในรอบนี้")
+        self._session_completed_runs = 0
+        self._box_stats_counts = self._empty_box_stats()
 
         self._create_app_icon()
         self._configure_styles()
@@ -201,6 +216,24 @@ class CookieRunBotGUI:
             darkcolor="#383b59",
             padding=(8, 7),
         )
+        style.configure(
+            "Stats.TNotebook",
+            background="#ffffff",
+            borderwidth=0,
+            tabmargins=(0, 0, 0, 0),
+        )
+        style.configure(
+            "Stats.TNotebook.Tab",
+            background="#eef0f6",
+            foreground="#666b7e",
+            font=("Segoe UI Semibold", 9),
+            padding=(13, 6),
+        )
+        style.map(
+            "Stats.TNotebook.Tab",
+            background=[("selected", "#6c5ce7"), ("active", "#e5e2fb")],
+            foreground=[("selected", "#ffffff")],
+        )
     def _build_ui(self):
         shell = tk.Frame(self.root, bg="#f4f6fb")
         shell.pack(fill="both", expand=True)
@@ -232,7 +265,7 @@ class CookieRunBotGUI:
         ).pack(anchor="w")
         tk.Label(
             brand_copy,
-            text="CLASSIC  •  v1.4.3",
+            text="CLASSIC  •  v1.4.5",
             bg="#171a2e",
             fg="#797e9b",
             font=("Segoe UI Semibold", 8),
@@ -416,16 +449,65 @@ class CookieRunBotGUI:
         statistics_header = add_header(
             statistics,
             "▦",
-            "สถิติการเล่นรอบปัจจุบัน",
-            "คำนวณจาก Coins และ EXP บนหน้าผลลัพธ์หลังตัวคูณหยุดแล้ว",
+            "สถิติรอบปัจจุบัน",
+            "รีเซ็ตอัตโนมัติทุกครั้งที่กด Start Bot",
         )
         ttk.Label(statistics_header, textvariable=self.session_elapsed_var, style="Count.TLabel").pack(side="right")
+
+        statistics_tabs = ttk.Notebook(statistics, style="Stats.TNotebook")
+        statistics_tabs.pack(fill="x", padx=15, pady=(0, 11))
+        overview_tab = tk.Frame(statistics_tabs, bg="#ffffff")
+        boxes_tab = tk.Frame(statistics_tabs, bg="#ffffff")
+        statistics_tabs.add(overview_tab, text="ภาพรวม")
+        statistics_tabs.add(boxes_tab, text="สถิติกล่อง")
         ttk.Label(
-            statistics,
+            overview_tab,
             textvariable=self.session_stats_var,
             style="TLabel",
             font=("Segoe UI Semibold", 11),
-        ).pack(fill="x", padx=16, pady=(0, 13))
+        ).pack(fill="x", padx=3, pady=10)
+
+        box_variables = (
+            ("ไม้", self.box_wood_total_var, self.box_wood_average_var, "#916640"),
+            ("เงิน", self.box_silver_total_var, self.box_silver_average_var, "#65788e"),
+            ("ทอง", self.box_gold_total_var, self.box_gold_average_var, "#b57b08"),
+            ("รุ้ง", self.box_rainbow_total_var, self.box_rainbow_average_var, "#8956c6"),
+            ("รวม", self.box_total_var, self.box_total_average_var, "#6551d7"),
+        )
+        box_row = tk.Frame(boxes_tab, bg="#ffffff")
+        box_row.pack(fill="x", pady=(6, 1))
+        for column, (title, total_var, average_var, color) in enumerate(box_variables):
+            box_row.columnconfigure(column, weight=1, uniform="box_stats")
+            tile = tk.Frame(box_row, bg="#f7f8fc", padx=5, pady=4)
+            tile.grid(row=0, column=column, sticky="nsew", padx=2)
+            tk.Label(
+                tile,
+                text=title,
+                bg="#f7f8fc",
+                fg="#777c90",
+                font=("Segoe UI Semibold", 8),
+            ).pack()
+            tk.Label(
+                tile,
+                textvariable=total_var,
+                bg="#f7f8fc",
+                fg=color,
+                font=("Segoe UI Semibold", 11),
+            ).pack()
+            tk.Label(
+                tile,
+                textvariable=average_var,
+                bg="#f7f8fc",
+                fg="#969bad",
+                font=("Segoe UI", 7),
+            ).pack()
+        tk.Label(
+            boxes_tab,
+            textvariable=self.box_unknown_detail_var,
+            bg="#ffffff",
+            fg="#8b7180",
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", padx=3, pady=(1, 5))
 
         log_frame = make_card(3, pady=(0, 0))
         log_header = add_header(log_frame, "≡", "Live Activity", "สถานะการทำงานล่าสุดของบอท")
@@ -705,6 +787,7 @@ class CookieRunBotGUI:
                     self._append_log(payload)
                     if self.process_mode == "bot":
                         self._update_session_stats(payload)
+                        self._update_box_stats(payload)
                     elif self.process_mode == "hearts":
                         heart_match = re.search(r"\[HEARTS\]\s+sent=(\d+)", payload)
                         if heart_match:
@@ -778,6 +861,21 @@ class CookieRunBotGUI:
         attempts, completed, coins, exp = (int(value) for value in match.groups())
         self._set_session_stats(attempts, completed, coins, exp)
 
+        # Duration fields were added after the original STATS protocol. Keep
+        # accepting older worker lines so an in-place GUI update can still run
+        # with an older worker executable during troubleshooting.
+        duration_match = re.search(
+            r"\blast_run_seconds=(\d+(?:\.\d+)?)\s+"
+            r"total_run_seconds=(\d+(?:\.\d+)?)\s+timed_runs=(\d+)",
+            line,
+        )
+        if duration_match:
+            last_seconds, total_seconds = (
+                float(value) for value in duration_match.groups()[:2]
+            )
+            timed_runs = int(duration_match.group(3))
+            self._set_run_duration_stats(last_seconds, total_seconds, timed_runs)
+
     @staticmethod
     def _format_session_average(total, completed):
         if completed <= 0:
@@ -804,6 +902,117 @@ class CookieRunBotGUI:
         self.session_coins_average_var.set(f"เฉลี่ย {average_coins} / รอบ")
         self.session_exp_total_var.set(f"{exp:,}")
         self.session_exp_average_var.set(f"เฉลี่ย {average_exp} / รอบ")
+        self._session_completed_runs = completed
+        if hasattr(self, "_box_stats_counts"):
+            self._refresh_box_stats_variables()
+
+    @staticmethod
+    def _empty_box_stats():
+        return {
+            "wood": 0,
+            "silver": 0,
+            "gold": 0,
+            "rainbow": 0,
+            "unknown": 0,
+            "total": 0,
+        }
+
+    @staticmethod
+    def _parse_box_stats_line(line):
+        """Parse the BOX_STATS protocol without depending on field order."""
+        match = re.search(r"\[BOX_STATS\](?P<body>[^\r\n]*)", line)
+        if not match:
+            return None
+
+        allowed = ("wood", "silver", "gold", "rainbow", "unknown", "total")
+        pairs = {
+            key: int(value)
+            for key, value in re.findall(
+                r"\b(wood|silver|gold|rainbow|unknown|total)=(\d+)\b",
+                match.group("body"),
+            )
+        }
+        if any(key not in pairs for key in allowed):
+            return None
+        return {key: pairs[key] for key in allowed}
+
+    def _update_box_stats(self, line):
+        counts = self._parse_box_stats_line(line)
+        if counts is not None:
+            self._set_box_stats(**counts)
+
+    def _set_box_stats(self, wood, silver, gold, rainbow, unknown=0, total=None):
+        counts = {
+            "wood": max(0, int(wood)),
+            "silver": max(0, int(silver)),
+            "gold": max(0, int(gold)),
+            "rainbow": max(0, int(rainbow)),
+            "unknown": max(0, int(unknown)),
+        }
+        calculated_total = sum(counts.values())
+        counts["total"] = calculated_total if total is None else max(0, int(total))
+        self._box_stats_counts = counts
+        self._refresh_box_stats_variables()
+
+    def _refresh_box_stats_variables(self):
+        counts = self._box_stats_counts
+        completed = max(0, int(getattr(self, "_session_completed_runs", 0)))
+        variables = {
+            "wood": (self.box_wood_total_var, self.box_wood_average_var),
+            "silver": (self.box_silver_total_var, self.box_silver_average_var),
+            "gold": (self.box_gold_total_var, self.box_gold_average_var),
+            "rainbow": (self.box_rainbow_total_var, self.box_rainbow_average_var),
+            "total": (self.box_total_var, self.box_total_average_var),
+        }
+        for key, (total_var, average_var) in variables.items():
+            value = counts[key]
+            total_var.set(f"{value:,}")
+            average_var.set(
+                f"เฉลี่ย {self._format_session_average(value, completed)} / รอบ"
+            )
+
+        unknown = counts["unknown"]
+        if unknown:
+            self.box_unknown_detail_var.set(
+                f"ยังแยกประเภทไม่ได้ {unknown:,} กล่อง (รวมอยู่ในยอดรวม)"
+            )
+        elif counts["total"]:
+            self.box_unknown_detail_var.set("แยกประเภทครบทุกกล่อง")
+        else:
+            self.box_unknown_detail_var.set("ยังไม่พบกล่องในรอบนี้")
+
+    def _reset_box_stats(self):
+        self._box_stats_counts = self._empty_box_stats()
+        self._refresh_box_stats_variables()
+
+    @staticmethod
+    def _format_run_duration(seconds):
+        """Format a stage duration compactly, including hours only as needed."""
+        rounded_seconds = max(0, int(float(seconds) + 0.5))
+        hours, remainder = divmod(rounded_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        if hours:
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        return f"{minutes:02d}:{seconds:02d}"
+
+    def _reset_run_duration_stats(self):
+        self.session_last_run_duration_var.set("--:--")
+        self.session_average_run_duration_var.set("เฉลี่ย --:-- / รอบ")
+
+    def _set_run_duration_stats(self, last_seconds, total_seconds, timed_runs):
+        timed_runs = max(0, int(timed_runs))
+        if timed_runs <= 0:
+            self._reset_run_duration_stats()
+            return
+
+        last_text = self._format_run_duration(last_seconds)
+        average_text = self._format_run_duration(
+            max(0.0, float(total_seconds)) / timed_runs
+        )
+        self.session_last_run_duration_var.set(last_text)
+        self.session_average_run_duration_var.set(
+            f"เฉลี่ย {average_text} / รอบ"
+        )
 
     @staticmethod
     def _format_session_elapsed(seconds):
@@ -815,6 +1024,8 @@ class CookieRunBotGUI:
     def _begin_bot_session(self):
         """Reset per-session rewards and start a fresh elapsed-time clock."""
         self._set_session_stats(0, 0, 0, 0)
+        self._reset_run_duration_stats()
+        self._reset_box_stats()
         self._session_started_at = time.monotonic()
         self._session_last_elapsed_second = 0
         self.session_elapsed_var.set("00:00:00")

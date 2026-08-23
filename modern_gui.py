@@ -89,6 +89,8 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             "boost_combo_row": 5 if content_width < 500 else 3,
             "stack_settings": True,
             "summary_columns": 2,
+            "summary_tile_count": 5,
+            "box_columns": 2 if content_width >= 420 else 1,
         }
 
     def _configure_styles(self):
@@ -104,6 +106,8 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         self.compact_layout = self.layout["compact"]
         self.sidebar_width = self.layout["sidebar_width"]
         self.summary_columns = self.layout["summary_columns"]
+        self.summary_tile_count = self.layout["summary_tile_count"]
+        self.box_columns = self.layout["box_columns"]
         self.narrow_controls = self.layout["narrow_controls"]
         self.root.geometry(
             f'{self.layout["width"]}x{self.layout["height"]}'
@@ -163,6 +167,21 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
                  (p(7), p(25)), (p(25), p(23))),
                 fill=color,
             )
+        elif name == "box":
+            draw.polygon(
+                ((p(9), p(22)), (p(32), p(10)), (p(55), p(22)), (p(32), p(35))),
+                fill=color,
+            )
+            draw.polygon(
+                ((p(11), p(27)), (p(29), p(38)), (p(29), p(57)), (p(11), p(47))),
+                outline=color,
+                width=width,
+            )
+            draw.polygon(
+                ((p(53), p(27)), (p(35), p(38)), (p(35), p(57)), (p(53), p(47))),
+                outline=color,
+                width=width,
+            )
         elif name == "tap":
             draw.ellipse((p(23), p(9), p(41), p(27)), outline=color, width=width)
             draw.line((p(32), p(18), p(32), p(48)), fill=color, width=p(7))
@@ -198,6 +217,11 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             "tap": ("tap", "#2E9F78", 16),
             "calendar": ("calendar", "#7B8197", 15),
             "heart": ("heart", "#FFFFFF", 17),
+            "box_wood": ("box", "#916640", 17),
+            "box_silver": ("box", "#667A91", 17),
+            "box_gold": ("box", "#C1880C", 17),
+            "box_rainbow": ("box", "#8A56C7", 17),
+            "box_total": ("box", PURPLE, 17),
         }
         for key, (shape, color, display_size) in icon_specs.items():
             source = self._draw_icon(shape, color)
@@ -404,19 +428,41 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         )
         self.status_label.pack(side="right", padx=16)
 
+        workspace_tabs = ctk.CTkTabview(
+            workspace,
+            corner_radius=0,
+            border_width=0,
+            fg_color=BG,
+            segmented_button_fg_color="#E8EAF2",
+            segmented_button_selected_color="#DCD6FF",
+            segmented_button_selected_hover_color="#D2CBFF",
+            segmented_button_unselected_color="#E8EAF2",
+            segmented_button_unselected_hover_color="#DCDDEA",
+            segmented_button_font=self._font(10, "bold"),
+            text_color=TEXT,
+            anchor="w",
+        )
+        workspace_tabs.grid(row=1, column=0, sticky="nsew")
+        overview_tab = workspace_tabs.add("ภาพรวม")
+        boxes_tab = workspace_tabs.add("สถิติกล่อง")
+        workspace_tabs.set("ภาพรวม")
+        self.workspace_tabs = workspace_tabs
+
         if self.compact_layout:
             body = ctk.CTkScrollableFrame(
-                workspace,
+                overview_tab,
                 corner_radius=0,
                 border_width=0,
                 fg_color=BG,
                 scrollbar_button_color="#D9DCE7",
                 scrollbar_button_hover_color="#C9CDD9",
             )
-            body.grid(row=1, column=0, sticky="nsew", padx=(12, 4), pady=(10, 7))
+            body.grid(row=0, column=0, sticky="nsew", padx=(12, 4), pady=(10, 7))
         else:
-            body = ctk.CTkFrame(workspace, fg_color="transparent")
-            body.grid(row=1, column=0, sticky="nsew", padx=17, pady=13)
+            body = ctk.CTkFrame(overview_tab, fg_color="transparent")
+            body.grid(row=0, column=0, sticky="nsew", padx=17, pady=13)
+        overview_tab.grid_columnconfigure(0, weight=1)
+        overview_tab.grid_rowconfigure(0, weight=1)
         body.grid_columnconfigure(0, weight=1)
         if not self.compact_layout:
             body.grid_rowconfigure(3, weight=1, minsize=150)
@@ -628,6 +674,16 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             detail_var=self.session_elapsed_detail_var,
             accent=("#EAF2FF", "#356FB6"),
         )
+        self._session_summary_tile(
+            session_summary,
+            4,
+            "clock",
+            "เวลาจบรอบล่าสุด",
+            self.session_last_run_duration_var,
+            detail_var=self.session_average_run_duration_var,
+            accent=("#EEEAFE", "#6652C7"),
+            columnspan=self.summary_columns,
+        )
 
         log_card = self._card(body, 2, pady=(0, 0))
         log_header = self._section_header(log_card, "activity", "Live Activity", "ดูสถานะการทำงานแบบเรียลไทม์")
@@ -657,6 +713,78 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         self.log.pack(fill="both", expand=True, padx=16, pady=(0, 14))
         self.log.configure(state="disabled")
         self._append_log("READY  •  ตั้งค่าไอเทม แล้วทดสอบ ADB ก่อนเริ่ม\n")
+        self._build_box_stats_tab(boxes_tab)
+
+    def _build_box_stats_tab(self, parent):
+        parent.grid_columnconfigure(0, weight=1)
+        parent.grid_rowconfigure(0, weight=1)
+        body = ctk.CTkScrollableFrame(
+            parent,
+            corner_radius=0,
+            border_width=0,
+            fg_color=BG,
+            scrollbar_button_color="#D9DCE7",
+            scrollbar_button_hover_color="#C9CDD9",
+        )
+        body.grid(row=0, column=0, sticky="nsew", padx=(12, 4), pady=(8, 7))
+        body.grid_columnconfigure(0, weight=1)
+
+        card = ctk.CTkFrame(
+            body,
+            corner_radius=16,
+            fg_color=CARD,
+            border_width=1,
+            border_color=BORDER,
+        )
+        card.grid(row=0, column=0, sticky="nsew")
+        self._section_header(
+            card,
+            "box_total",
+            "กล่องที่เก็บได้",
+            (
+                "ไม้ • เงิน • ทอง • รุ้ง"
+                if self.box_columns == 1
+                else "ไม้ • เงิน • ทอง • รุ้ง — ค่าเฉลี่ยต่อรอบที่จบ"
+            ),
+        )
+
+        summary = ctk.CTkFrame(card, fg_color="transparent")
+        summary.pack(fill="x", padx=16, pady=(0, 8))
+        summary.grid_columnconfigure(
+            tuple(range(self.box_columns)),
+            weight=1,
+            uniform="box_summary",
+        )
+        box_tiles = (
+            ("box_wood", "กล่องไม้", self.box_wood_total_var, self.box_wood_average_var, ("#F7EDE3", "#895D36")),
+            ("box_silver", "กล่องเงิน", self.box_silver_total_var, self.box_silver_average_var, ("#ECF2F7", "#60758B")),
+            ("box_gold", "กล่องทอง", self.box_gold_total_var, self.box_gold_average_var, ("#FFF3D2", "#A97305")),
+            ("box_rainbow", "กล่องรุ้ง", self.box_rainbow_total_var, self.box_rainbow_average_var, ("#F3EAFF", "#8650C3")),
+            ("box_total", "กล่องทั้งหมด", self.box_total_var, self.box_total_average_var, (PURPLE_SOFT, PURPLE)),
+        )
+        for position, (icon, title, value_var, detail_var, accent) in enumerate(box_tiles):
+            self._session_summary_tile(
+                summary,
+                position,
+                icon,
+                title,
+                value_var,
+                detail_var=detail_var,
+                accent=accent,
+                columnspan=self.box_columns if position == len(box_tiles) - 1 else 1,
+                columns=self.box_columns,
+                tile_count=len(box_tiles),
+            )
+
+        warning = ctk.CTkFrame(card, corner_radius=11, fg_color="#F8F2F5")
+        warning.pack(fill="x", padx=16, pady=(0, 14))
+        ctk.CTkLabel(
+            warning,
+            textvariable=self.box_unknown_detail_var,
+            text_color="#866675",
+            font=self._font(9),
+            anchor="w",
+        ).pack(fill="x", padx=12, pady=8)
 
     def _session_summary_tile(
         self,
@@ -668,6 +796,9 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         detail_var=None,
         detail_text="",
         accent=(PURPLE_SOFT, PURPLE),
+        columnspan=1,
+        columns=None,
+        tile_count=None,
     ):
         tile = ctk.CTkFrame(
             parent,
@@ -677,14 +808,19 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             border_width=1,
             border_color=BORDER,
         )
-        row, column = divmod(position, self.summary_columns)
-        last_column = self.summary_columns - 1
-        last_row = (4 - 1) // self.summary_columns
+        columns = self.summary_columns if columns is None else max(1, int(columns))
+        tile_count = self.summary_tile_count if tile_count is None else max(1, int(tile_count))
+        row, column = divmod(position, columns)
+        last_column = columns - 1
+        last_row = (tile_count - 1) // columns
+        columnspan = max(1, min(int(columnspan), columns - column))
+        reaches_last_column = column + columnspan - 1 == last_column
         tile.grid(
             row=row,
             column=column,
+            columnspan=columnspan,
             sticky="nsew",
-            padx=(0 if column == 0 else 4, 0 if column == last_column else 4),
+            padx=(0 if column == 0 else 4, 0 if reaches_last_column else 4),
             pady=(0 if row == 0 else 4, 0 if row == last_row else 4),
         )
         tile.grid_propagate(False)

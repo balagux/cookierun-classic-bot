@@ -7,7 +7,6 @@ from actions import (
     accept_congratulations,
     accept_daily_checkin,
     accept_daily_checkin_boost_set,
-    accept_daily_new,
     accept_daily_treasure,
     accept_enter_league,
     accept_league_results,
@@ -537,7 +536,35 @@ def main(options=None, device_ip=None, device_port=None):
         _print_box_stats(box_stats)
 
         while True:
-            device_screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
+            # Retry screen capture on transient ADB failures (LDPlayer lag,
+            # temporary disconnects) instead of crashing the entire bot.
+            device_screen = None
+            for _capture_attempt in range(5):
+                try:
+                    device_screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
+                    break
+                except Exception as capture_err:
+                    wait = 0.5 * (2 ** _capture_attempt)
+                    print(
+                        f"⚠️ Screen capture failed (attempt "
+                        f"{_capture_attempt + 1}/5): {capture_err}"
+                    )
+                    time.sleep(wait)
+            if device_screen is None:
+                print("❌ Screen capture failed after 5 attempts — restarting app...")
+                _reset_app_or_raise("Screen capture keeps failing.")
+                close_announcement_dialog()
+                session_start_time = time.time()
+                session_reset_interval = random.uniform(*SESSION_RESET_INTERVAL)
+                detection_group = "PRE_GAME"
+                run_in_progress = False
+                run_durations.cancel()
+                box_stats.cancel_run()
+                relay_quick_exit_pending = False
+                relay_quick_exit_rewards = {"coins": 0, "exp": 0}
+                last_stage = None
+                is_first_game = True
+                continue
             # The watcher owns the click. The main loop pauses so it cannot also
             # trigger a stage action against the same dialog or the screen below it.
             if detect_all_template_matches(device_screen, GLOBAL_CONFIRM_TEMPLATE):
@@ -855,11 +882,6 @@ def main(options=None, device_ip=None, device_port=None):
                 accept_daily_treasure()
                 detection_group = "PRE_GAME"
                 last_stage = None
-            elif stage == "DAILY_NEW":
-                print("📰 Detected Stage: DAILY_NEW")
-                accept_daily_new()
-                detection_group = "PRE_GAME"
-                last_stage = None
             elif stage == "ENTER_LEAGUE":
                 print("🏆 Detected Stage: ENTER_LEAGUE")
                 accept_enter_league()
@@ -909,6 +931,7 @@ def main(options=None, device_ip=None, device_port=None):
             elif stage == "ANNOUNCEMENT":
                 print("📢 Detected Stage: ANNOUNCEMENT")
                 close_announcement_dialog()
+                detection_group = "PRE_GAME"
                 last_stage = None
             elif stage == "ANTI_BOT":
                 print("⚠️ Detected Stage: ANTI_BOT")

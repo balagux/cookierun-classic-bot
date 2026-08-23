@@ -17,6 +17,8 @@ class GuiLayoutTests(unittest.TestCase):
         self.assertEqual(layout["relic_switch_row"], 2)
         self.assertEqual(layout["boost_combo_row"], 3)
         self.assertEqual(layout["summary_columns"], 2)
+        self.assertEqual(layout["summary_tile_count"], 5)
+        self.assertEqual(layout["box_columns"], 2)
 
     def test_1024_by_768_keeps_the_same_compact_controller(self):
         layout = ModernCookieRunBotGUI._layout_for_screen(1024, 768)
@@ -31,6 +33,7 @@ class GuiLayoutTests(unittest.TestCase):
         self.assertEqual(layout["relic_switch_row"], 2)
         self.assertEqual(layout["boost_combo_row"], 3)
         self.assertEqual(layout["summary_columns"], 2)
+        self.assertEqual(layout["box_columns"], 2)
 
     def test_800_by_600_keeps_everything_inside_the_display(self):
         layout = ModernCookieRunBotGUI._layout_for_screen(800, 600)
@@ -40,6 +43,7 @@ class GuiLayoutTests(unittest.TestCase):
         self.assertTrue(layout["compact"])
         self.assertEqual(layout["sidebar_width"], 180)
         self.assertEqual(layout["summary_columns"], 2)
+        self.assertEqual(layout["box_columns"], 2)
         self.assertFalse(layout["narrow_controls"])
         self.assertEqual(layout["relay_quick_exit_row"], 1)
         self.assertEqual(layout["relic_switch_row"], 2)
@@ -68,6 +72,7 @@ class GuiLayoutTests(unittest.TestCase):
         self.assertEqual(layout["relic_switch_row"], 4)
         self.assertEqual(layout["boost_combo_row"], 5)
         self.assertLess(layout["content_width"], 500)
+        self.assertEqual(layout["box_columns"], 1)
 
 
 if __name__ == "__main__":

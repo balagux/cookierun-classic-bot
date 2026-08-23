@@ -1147,9 +1147,19 @@ def close_announcement_dialog():
         print(f"🖱️ Tapping close announcement dialog button {i+1}/5")
         safe_device_tap(DEVICE_IP, DEVICE_PORT, CLOSE_ANNOUNCEMENT_DIALOG_BUTTON[0], CLOSE_ANNOUNCEMENT_DIALOG_BUTTON[1])
         time.sleep(random.uniform(0.8, 1.4))
+        # Verify whether the announcement popup is still visible
+        device_screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
+        if device_screen is not None:
+            still_visible = detect_stage(device_screen, ["ANNOUNCEMENT", "DAILY_NEW"])
+            if still_visible is None:
+                print("✅ Announcement dialog closed successfully.")
+                if detect_stage(device_screen, ["PARTY_RUN"]) == "PARTY_RUN":
+                    close_party_run_mode()
+                return
+    # Fallback: check party run even if we exhausted all taps
     time.sleep(random.uniform(0.8, 1.4))
     device_screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
-    if detect_stage(device_screen, ["PARTY_RUN"]) == "PARTY_RUN":
+    if device_screen is not None and detect_stage(device_screen, ["PARTY_RUN"]) == "PARTY_RUN":
         close_party_run_mode()
 
 

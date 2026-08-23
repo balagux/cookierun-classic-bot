@@ -155,12 +155,35 @@ class GuiStartCommandTests(unittest.TestCase):
         gui.root = mock.Mock()
         gui._append_log = mock.Mock()
         gui._update_session_stats = mock.Mock()
+        gui._update_box_stats = mock.Mock()
 
         gui._poll_events()
 
         gui._append_log.assert_called_once()
         gui._update_session_stats.assert_not_called()
+        gui._update_box_stats.assert_not_called()
         self.assertEqual(gui._heart_sent_count, 12)
+        gui.root.after.assert_called_once_with(100, gui._poll_events)
+
+    def test_bot_logs_update_reward_and_box_stats_together(self):
+        gui = object.__new__(CookieRunBotGUI)
+        gui.events = queue.Queue()
+        line = (
+            "[BOX_STATS] wood=1 silver=2 gold=3 rainbow=4 unknown=0 total=10\n"
+        )
+        gui.events.put(("log", line))
+        gui.process_mode = "bot"
+        gui.root = mock.Mock()
+        gui._append_log = mock.Mock()
+        gui._update_session_stats = mock.Mock()
+        gui._update_box_stats = mock.Mock()
+        gui._update_session_elapsed = mock.Mock()
+
+        gui._poll_events()
+
+        gui._update_session_stats.assert_called_once_with(line)
+        gui._update_box_stats.assert_called_once_with(line)
+        gui._update_session_elapsed.assert_called_once_with()
         gui.root.after.assert_called_once_with(100, gui._poll_events)
 
     def test_heart_worker_exit_reports_success_error_and_user_stop(self):
