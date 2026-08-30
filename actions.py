@@ -73,8 +73,6 @@ from config import (
     CONNECTION_LOST_RELOAD_BUTTON,
     STAGE_GAME_RELAY_REGION,
     STAGE_GAME_RELAY_TEMPLATE,
-    STAGE_GAME_START_REGION,
-    STAGE_GAME_START_TEMPLATE,
     STAGE_MAINMENU_REGION,
     STAGE_MAINMENU_TEMPLATE,
 )
@@ -344,6 +342,31 @@ def _wait_for_quit_button(region, timeout=QUIT_BUTTON_WAIT_TIMEOUT):
     return False
 
 
+def _banner_is_bright(screen):
+    """Return True if the GAME_START/GAME_RELAY banner region is bright.
+
+    The GAME_START banner is bright (center mean ~184) while the GAME_RELAY
+    banner is dark (center mean ~110).  Because the two templates share the
+    same detection region and the relay template can falsely match the start
+    screen, we use brightness to tell them apart.  A bright banner means the
+    run has not started yet, so the quick-exit must be cancelled.
+    """
+    if screen is None:
+        return False
+    x1, y1, x2, y2 = STAGE_GAME_RELAY_REGION
+    banner = screen[y1:y2, x1:x2]
+    if banner.size == 0:
+        return False
+    gray = cv2.cvtColor(banner, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape
+    # Center 60x60 region (the most distinguishing part).
+    cy, cx = h // 2, w // 2
+    center = gray[max(0, cy - 30):cy + 30, max(0, cx - 30):cx + 30]
+    mean = float(center.mean())
+    # Bright (>150) = still on the start screen; dark (<130) = relay running.
+    return mean > 150
+
+
 def quick_exit_after_cookie_relay():
     """Wait for cookie two to start running, then leave through Pause -> Quit.
 
@@ -366,12 +389,19 @@ def quick_exit_after_cookie_relay():
     # banner or back on the main menu), do NOT press Quit.  This prevents the
     # bot from quitting the game immediately after pressing Start when the
     # GAME_RELAY template falsely matches the GAME_START screen.
+    #
+    # The GAME_START and GAME_RELAY templates share the same detection region
+    # and the GAME_RELAY template can falsely match the start screen, so we
+    # cannot rely on template matching alone.  Instead we use the banner
+    # brightness: the GAME_START banner is BRIGHT (center ~184) while the
+    # GAME_RELAY banner is DARK (center ~110).  If the banner is still bright,
+    # the run has not started yet, so we cancel the quick-exit.
     screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
     if detect_templates(screen, STAGE_MAINMENU_TEMPLATE, STAGE_MAINMENU_REGION):
         print("⚠️ Back on the main menu — relay quick-exit cancelled safely.")
         return False
-    if detect_templates(screen, STAGE_GAME_START_TEMPLATE, STAGE_GAME_START_REGION):
-        print("⚠️ Run has not started yet — relay quick-exit cancelled safely.")
+    if _banner_is_bright(screen):
+        print("⚠️ Run has not started yet (banner still bright) — relay quick-exit cancelled safely.")
         return False
     print("⏸️ Second cookie is running — opening Pause and quitting to Main Menu...")
     device_tap(DEVICE_IP, DEVICE_PORT, PAUSE_GAME_BUTTON[0], PAUSE_GAME_BUTTON[1])
