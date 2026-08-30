@@ -2,7 +2,7 @@ import random
 import time
 
 import actions as actions_module
-from adb import device_capture_screen, device_connect, device_reset_app, device_tap
+from adb import device_back, device_capture_screen, device_connect, device_reset_app, device_tap
 from actions import (
     accept_congratulations,
     accept_daily_checkin,
@@ -50,6 +50,12 @@ from config import (
     DETECTION_RECOVERY_SCAN_INTERVAL,
     DEVICE_IP,
     DEVICE_PORT,
+    FRIEND_BOTTOM_LEADERBOARD_REGION,
+    FRIEND_BOTTOM_LEADERBOARD_TEMPLATE,
+    FRIEND_SEND_LIFE_REGION,
+    FRIEND_SEND_LIFE_TEMPLATE,
+    FRIEND_TOP_LEADERBOARD_REGION,
+    FRIEND_TOP_LEADERBOARD_TEMPLATE,
     GLOBAL_CONFIRM_TEMPLATE,
     NEXT_GAME_DELAY,
     RESULT_REWARD_MIN_WAIT,
@@ -290,6 +296,35 @@ def should_quick_exit_after_relay(options):
     )
 
 
+def _is_friends_leaderboard_open(screen):
+    """Return True when the Friends leaderboard overlay covers the main menu.
+
+    This overlay shares the top-left corner with the normal main menu, so
+    ``MAINMENU`` is still detected while it is open.  Tapping the Play!
+    coordinate in that state would hit the leaderboard's own controls (mail,
+    cookie/bake buttons) instead of starting a run.
+    """
+    if screen is None:
+        return False
+    return bool(
+        detect_all_template_matches(
+            screen,
+            FRIEND_TOP_LEADERBOARD_TEMPLATE,
+            FRIEND_TOP_LEADERBOARD_REGION,
+        )
+        or detect_all_template_matches(
+            screen,
+            FRIEND_SEND_LIFE_TEMPLATE,
+            FRIEND_SEND_LIFE_REGION,
+        )
+        or detect_all_template_matches(
+            screen,
+            FRIEND_BOTTOM_LEADERBOARD_TEMPLATE,
+            FRIEND_BOTTOM_LEADERBOARD_REGION,
+        )
+    )
+
+
 def prompt_user_options():
     desired_boost_template = None
 
@@ -521,6 +556,7 @@ def main(options=None, device_ip=None, device_port=None):
         is_first_game = True
         detection_group = "PRE_GAME"
         last_detected_time = time.time()
+        stuck_scan_count = 0
         session_start_time = time.time()
         session_reset_interval = random.uniform(*SESSION_RESET_INTERVAL)
         run_in_progress = False
@@ -588,8 +624,24 @@ def main(options=None, device_ip=None, device_port=None):
                         ),
                     )
                     last_detected_time = time.time()
+                    if stage is None and detection_group != "IN_GAME":
+                        stuck_scan_count += 1
+                    else:
+                        stuck_scan_count = 0
+                    if stuck_scan_count >= 2:
+                        # Stuck on a screen the bot does not recognise (mail,
+                        # cookie baking, etc.). One BACK press returns to the
+                        # main menu so the loop can recover on its own.
+                        print(
+                            "↩️ No known screen after repeated recovery scans — "
+                            "pressing BACK to return to the main menu..."
+                        )
+                        device_back(DEVICE_IP, DEVICE_PORT)
+                        time.sleep(1.0)
+                        stuck_scan_count = 0
             else:
                 last_detected_time = time.time()
+                stuck_scan_count = 0
 
             if stage == last_stage:
                 time.sleep(0.1)
@@ -692,6 +744,20 @@ def main(options=None, device_ip=None, device_port=None):
                         time.sleep(delay)
                 retry_interrupted_run = False
                 is_first_game = False
+                # The Friends leaderboard can overlay the main menu after a run
+                # and cover the Play! button. Tapping START_BUTTON blindly would
+                # then hit the leaderboard's own mail/cookie controls. Close the
+                # overlay first, then let the next loop re-detect the clean menu.
+                try:
+                    guard_screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
+                except Exception:
+                    guard_screen = None
+                if _is_friends_leaderboard_open(guard_screen):
+                    print("📋 Friends leaderboard is covering the main menu — closing it...")
+                    device_back(DEVICE_IP, DEVICE_PORT)
+                    time.sleep(1.0)
+                    last_stage = None
+                    continue
                 start_game()
                 detection_group = "PRE_GAME"
                 last_stage = None

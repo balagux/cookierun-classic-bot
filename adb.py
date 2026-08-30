@@ -129,6 +129,17 @@ def safe_device_tap(ip: str, port: int, x: int, y: int):
     )
 
 
+def device_back(ip: str, port: int):
+    """Press the Android BACK key to close overlays/dialogs and return home."""
+    target = _resolve_device_target(ip, port)
+    adb_run(
+        [ADB_EXECUTABLE, "-s", target, "shell", "input", "keyevent", "4"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+
 def device_scroll(ip: str, port: int, x: int, y: int, direction: str = "up", distance: int = 500, duration: int = 300):
     """Perform a deterministic swipe centered on ``(x, y)``.
 
