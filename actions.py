@@ -73,6 +73,8 @@ from config import (
     CONNECTION_LOST_RELOAD_BUTTON,
     STAGE_GAME_RELAY_REGION,
     STAGE_GAME_RELAY_TEMPLATE,
+    STAGE_GAME_START_REGION,
+    STAGE_GAME_START_TEMPLATE,
     STAGE_MAINMENU_REGION,
     STAGE_MAINMENU_TEMPLATE,
 )
@@ -343,7 +345,14 @@ def _wait_for_quit_button(region, timeout=QUIT_BUTTON_WAIT_TIMEOUT):
 
 
 def quick_exit_after_cookie_relay():
-    """Wait for cookie two to start running, then leave through Pause -> Quit."""
+    """Wait for cookie two to start running, then leave through Pause -> Quit.
+
+    Guards against a false GAME_RELAY detection on the GAME_START screen: the
+    two stages share the same detection region, so the relay template can match
+    before the run actually begins.  We only proceed to quit once the game is
+    genuinely in the running phase (the start banner is gone and we are not on
+    the main menu).
+    """
     print("🏃 Waiting for the second cookie to start running...")
     started_at = time.monotonic()
     time.sleep(RELAY_QUICK_EXIT_MIN_WAIT)
@@ -353,6 +362,17 @@ def quick_exit_after_cookie_relay():
             break
         time.sleep(0.12)
     time.sleep(RELAY_QUICK_EXIT_RUNOUT_BUFFER)
+    # Safety guard: if the run has not actually started (still on the start
+    # banner or back on the main menu), do NOT press Quit.  This prevents the
+    # bot from quitting the game immediately after pressing Start when the
+    # GAME_RELAY template falsely matches the GAME_START screen.
+    screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
+    if detect_templates(screen, STAGE_MAINMENU_TEMPLATE, STAGE_MAINMENU_REGION):
+        print("⚠️ Back on the main menu — relay quick-exit cancelled safely.")
+        return False
+    if detect_templates(screen, STAGE_GAME_START_TEMPLATE, STAGE_GAME_START_REGION):
+        print("⚠️ Run has not started yet — relay quick-exit cancelled safely.")
+        return False
     print("⏸️ Second cookie is running — opening Pause and quitting to Main Menu...")
     device_tap(DEVICE_IP, DEVICE_PORT, PAUSE_GAME_BUTTON[0], PAUSE_GAME_BUTTON[1])
     if not _wait_for_quit_button(PAUSE_QUIT_BUTTON_REGION):

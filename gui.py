@@ -265,7 +265,7 @@ class CookieRunBotGUI:
         ).pack(anchor="w")
         tk.Label(
             brand_copy,
-            text="CLASSIC  •  v1.4.6",
+            text="CLASSIC  •  v1.4.7",
             bg="#171a2e",
             fg="#797e9b",
             font=("Segoe UI Semibold", 8),
