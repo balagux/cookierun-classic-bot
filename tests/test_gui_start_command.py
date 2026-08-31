@@ -52,6 +52,7 @@ class GuiStartCommandTests(unittest.TestCase):
         self.assertEqual(mode, "bot")
         self.assertIn("--fast-start", command)
         self.assertIn("--cookie-relay", command)
+        self.assertIn("--quick-exit-after-relay", command)
         self.assertNotIn("--wait-relay-death", command)
         self.assertEqual(command[command.index("--boost-index") + 1], "3")
         self.assertEqual(command[command.index("--max-runs") + 1], "7")
@@ -104,7 +105,7 @@ class GuiStartCommandTests(unittest.TestCase):
         self.assertNotIn("--cookie-relay", command)
         self.assertNotIn("--wait-relay-death", command)
 
-    def test_relay_quick_exit_setting_defaults_on_and_is_persisted(self):
+    def test_relay_quick_exit_setting_defaults_off_and_is_persisted(self):
         gui = object.__new__(CookieRunBotGUI)
         gui.ip_var = _Value("127.0.0.1")
         gui.port_var = _Value("5555")
@@ -122,7 +123,7 @@ class GuiStartCommandTests(unittest.TestCase):
             settings_file.write_text("{}", encoding="utf-8")
             with mock.patch("gui.SETTINGS_FILE", settings_file):
                 gui._load_settings()
-                self.assertTrue(gui.relay_quick_exit_var.get())
+                self.assertFalse(gui.relay_quick_exit_var.get())
 
                 gui.relay_quick_exit_var.set(False)
                 gui._save_settings()

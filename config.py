@@ -13,6 +13,7 @@ NEXT_GAME_DELAY = (0.5, 1.0)  # seconds between completed runs
 RELAY_QUICK_EXIT_MIN_WAIT = 1.2  # let the second cookie visibly begin its run
 RELAY_QUICK_EXIT_TIMEOUT = 2.5
 RELAY_QUICK_EXIT_RUNOUT_BUFFER = 0.35
+RELAY_QUICK_EXIT_CONFIRM_FRAMES = 3  # require consecutive running frames before quitting
 RESULT_REWARD_MIN_WAIT = 2.5  # let multiplier/count-up animations finish
 RESULT_REWARD_POLL_INTERVAL = 0.45
 RESULT_REWARD_STABLE_READS = 3

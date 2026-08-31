@@ -287,12 +287,20 @@ def should_claim_relic_rewards(options):
 def should_quick_exit_after_relay(options):
     """Return whether Cookie Relay should end the run as soon as cookie two starts.
 
-    The missing-option default keeps the historical quick-exit behaviour for
-    console launches and settings files created before the toggle existed.
+    Quick-exit is opt-in because it opens the game's Exit screen and can close
+    the game if stage detection is stale or ambiguous.
     """
     return bool(
         options.get("use_cookie_relay")
-        and options.get("quick_exit_after_relay", True)
+        and options.get("quick_exit_after_relay", False)
+    )
+
+
+def should_process_cookie_relay(options, run_in_progress):
+    """Return whether a detected relay belongs to an active game run."""
+    return bool(
+        run_in_progress
+        and options.get("use_cookie_relay")
     )
 
 
@@ -792,7 +800,16 @@ def main(options=None, device_ip=None, device_port=None):
                 last_stage = None
             elif stage == "GAME_RELAY":
                 print("🔄 Detected Stage: GAME_RELAY")
-                if options["use_cookie_relay"]:
+                if not run_in_progress:
+                    # Recovery scans include every template and can identify the
+                    # relay banner while the post-Start purchase screen is still
+                    # active. Never tap Relay or open Exit before play_game().
+                    print("⚠️ Ignoring GAME_RELAY before a game run has started.")
+                    detection_group = "PRE_GAME"
+                    last_stage = None
+                    time.sleep(0.25)
+                    continue
+                if should_process_cookie_relay(options, run_in_progress):
                     quick_exit_enabled = should_quick_exit_after_relay(options)
                     if quick_exit_enabled:
                         using_cookie_relay(wait_after=False)

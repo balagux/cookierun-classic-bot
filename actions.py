@@ -69,6 +69,7 @@ from config import (
     RELAY_QUICK_EXIT_MIN_WAIT,
     RELAY_QUICK_EXIT_RUNOUT_BUFFER,
     RELAY_QUICK_EXIT_TIMEOUT,
+    RELAY_QUICK_EXIT_CONFIRM_FRAMES,
     START_BUTTON,
     CONNECTION_LOST_RELOAD_BUTTON,
     STAGE_GAME_RELAY_REGION,
@@ -351,9 +352,11 @@ def _banner_is_bright(screen):
     screen, we use brightness to tell them apart.  A bright banner means the
     run has not started yet, so the quick-exit must be cancelled.
     """
-    if screen is None:
+    if screen is None or not hasattr(screen, "shape") or len(screen.shape) < 2:
         return False
     x1, y1, x2, y2 = STAGE_GAME_RELAY_REGION
+    if screen.shape[0] < y2 or screen.shape[1] < x2:
+        return False
     banner = screen[y1:y2, x1:x2]
     if banner.size == 0:
         return False
@@ -396,13 +399,25 @@ def quick_exit_after_cookie_relay():
     # brightness: the GAME_START banner is BRIGHT (center ~184) while the
     # GAME_RELAY banner is DARK (center ~110).  If the banner is still bright,
     # the run has not started yet, so we cancel the quick-exit.
-    screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
-    if detect_templates(screen, STAGE_MAINMENU_TEMPLATE, STAGE_MAINMENU_REGION):
-        print("⚠️ Back on the main menu — relay quick-exit cancelled safely.")
-        return False
-    if _banner_is_bright(screen):
-        print("⚠️ Run has not started yet (banner still bright) — relay quick-exit cancelled safely.")
-        return False
+    # A single frame can be stale or can make GAME_RELAY match the GAME_START
+    # banner. Require several consecutive, valid running frames before sending
+    # any Pause/Quit input. This is intentionally fail-safe: an invalid or
+    # ambiguous frame cancels quick-exit rather than risking closing the game.
+    running_frames = 0
+    for _ in range(RELAY_QUICK_EXIT_CONFIRM_FRAMES):
+        screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
+        if screen is None or not hasattr(screen, "shape") or len(screen.shape) < 2:
+            print("⚠️ Invalid screen during relay confirmation — quick-exit cancelled safely.")
+            return False
+        if detect_templates(screen, STAGE_MAINMENU_TEMPLATE, STAGE_MAINMENU_REGION):
+            print("⚠️ Back on the main menu — relay quick-exit cancelled safely.")
+            return False
+        if _banner_is_bright(screen):
+            print("⚠️ Run has not started yet (banner still bright) — relay quick-exit cancelled safely.")
+            return False
+        running_frames += 1
+        if running_frames < RELAY_QUICK_EXIT_CONFIRM_FRAMES:
+            time.sleep(0.12)
     print("⏸️ Second cookie is running — opening Pause and quitting to Main Menu...")
     device_tap(DEVICE_IP, DEVICE_PORT, PAUSE_GAME_BUTTON[0], PAUSE_GAME_BUTTON[1])
     if not _wait_for_quit_button(PAUSE_QUIT_BUTTON_REGION):

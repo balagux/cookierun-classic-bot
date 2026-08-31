@@ -43,7 +43,7 @@ class MainWorkerTests(unittest.TestCase):
         self.assertTrue(options["use_cookie_relay"])
         self.assertFalse(options["quick_exit_after_relay"])
 
-    def test_relay_quick_exit_remains_enabled_without_the_new_flag(self):
+    def test_relay_quick_exit_is_disabled_without_an_explicit_setting(self):
         args = self.main_module.build_parser().parse_args(
             ["--run-bot", "--cookie-relay"]
         )
@@ -51,6 +51,15 @@ class MainWorkerTests(unittest.TestCase):
         options = self.main_module._options_from_args(args)
 
         self.assertTrue(options["use_cookie_relay"])
+        self.assertFalse(options["quick_exit_after_relay"])
+
+    def test_relay_quick_exit_can_be_enabled_explicitly(self):
+        args = self.main_module.build_parser().parse_args(
+            ["--run-bot", "--cookie-relay", "--quick-exit-after-relay"]
+        )
+
+        options = self.main_module._options_from_args(args)
+
         self.assertTrue(options["quick_exit_after_relay"])
 
     def test_send_hearts_mode_calls_one_shot_worker(self):
