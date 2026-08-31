@@ -56,7 +56,6 @@ from config import (
     FRIEND_SEND_LIFE_TEMPLATE,
     FRIEND_TOP_LEADERBOARD_REGION,
     FRIEND_TOP_LEADERBOARD_TEMPLATE,
-    GLOBAL_CONFIRM_TEMPLATE,
     NEXT_GAME_DELAY,
     RESULT_REWARD_MIN_WAIT,
     RESULT_REWARD_POLL_INTERVAL,
@@ -609,13 +608,6 @@ def main(options=None, device_ip=None, device_port=None):
                 last_stage = None
                 is_first_game = True
                 continue
-            # The watcher owns the click. The main loop pauses so it cannot also
-            # trigger a stage action against the same dialog or the screen below it.
-            if detect_all_template_matches(device_screen, GLOBAL_CONFIRM_TEMPLATE):
-                _dismiss_visible_confirm_buttons(device_screen)
-                last_stage = None
-                last_detected_time = time.time()
-                continue
             stage = detect_stage(
                 device_screen,
                 get_detection_stage_names(
@@ -752,20 +744,6 @@ def main(options=None, device_ip=None, device_port=None):
                         time.sleep(delay)
                 retry_interrupted_run = False
                 is_first_game = False
-                # The Friends leaderboard can overlay the main menu after a run
-                # and cover the Play! button. Tapping START_BUTTON blindly would
-                # then hit the leaderboard's own mail/cookie controls. Close the
-                # overlay first, then let the next loop re-detect the clean menu.
-                try:
-                    guard_screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
-                except Exception:
-                    guard_screen = None
-                if _is_friends_leaderboard_open(guard_screen):
-                    print("📋 Friends leaderboard is covering the main menu — closing it...")
-                    device_back(DEVICE_IP, DEVICE_PORT)
-                    time.sleep(1.0)
-                    last_stage = None
-                    continue
                 start_game()
                 detection_group = "PRE_GAME"
                 last_stage = None
