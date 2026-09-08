@@ -936,6 +936,8 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
 
     def _test_telegram(self):
         """Send a test Telegram message in a background thread."""
+        if getattr(self, "_telegram_test_running", False):
+            return
         token = self.telegram_token_var.get().strip()
         chat_id = self.telegram_chat_var.get().strip()
         try:
@@ -944,6 +946,11 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         except Exception as exc:
             self._append_log(f"⚠️ ตั้งค่า Telegram ผิดพลาด: {exc}\n")
             return
+        self._telegram_test_running = True
+        self._telegram_test_finished = False
+        test_button = getattr(self, "telegram_test_button", None)
+        if test_button is not None:
+            test_button.configure(state="disabled")
         self._append_log("📤 กำลังส่งข้อความทดสอบ Telegram...\n")
         self._set_status("กำลังทดสอบส่ง...", "testing")
         threading.Thread(target=self._run_telegram_test, daemon=True).start()
@@ -953,6 +960,7 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         ok = notifier_mod.send_message(
             "✅ การแจ้งเตือน CookieRun Bot ทำงานปกติ"
         )
+        self._telegram_test_running = False
         self.events.put(("telegram_test", ok))
 
     def _session_summary_tile(

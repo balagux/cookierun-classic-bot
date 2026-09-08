@@ -74,6 +74,8 @@ class CookieRunBotGUI:
         self._box_stats_counts = self._empty_box_stats()
         self.telegram_token_var = tk.StringVar(value="")
         self.telegram_chat_var = tk.StringVar(value="")
+        self._telegram_test_finished = True
+        self._telegram_test_running = False
 
         self._create_app_icon()
         self._configure_styles()
@@ -888,6 +890,18 @@ class CookieRunBotGUI:
                         self._save_settings()
                     else:
                         self._set_status("เชื่อมต่อไม่สำเร็จ", "error")
+                elif event == "telegram_test":
+                    ok = bool(payload)
+                    self.telegram_test_finished = True
+                    test_button = getattr(self, "telegram_test_button", None)
+                    if test_button is not None:
+                        test_button.configure(state="normal")
+                    if ok:
+                        self._set_status("ส่งข้อความทดสอบสำเร็จ", "success")
+                        self._append_log("✅ ส่งข้อความทดสอบ Telegram สำเร็จ\n")
+                    else:
+                        self._set_status("ส่งข้อความทดสอบไม่สำเร็จ", "error")
+                        self._append_log("❌ ส่งข้อความทดสอบ Telegram ไม่สำเร็จ (ตรวจ Token/Chat ID)\n")
         except queue.Empty:
             pass
         if self.process_mode == "bot":
