@@ -68,7 +68,6 @@ from config import (
     RESULT_REWARD_TIMEOUT,
     SESSION_RESET_INTERVAL,
     STAGE_TEMPLATES,
-    TELEGRAM_SUMMARY_INTERVAL,
     UNKNOWN_SCREEN_RESET_THRESHOLD,
 )
 from detection import detect_all_template_matches, detect_stage, load_templates
@@ -458,45 +457,6 @@ def receive_and_send_mailbox_hearts(device_ip=None, device_port=None):
     if notifier.is_enabled():
         notifier.send_summary(hearts_used=processed_count)
     return processed_count
-
-
-def _is_telegraph_enabled():
-    """Return whether Telegram notifications are configured and enabled."""
-    return telegram_enabled()
-
-
-def _maybe_send_telegram_summary(
-    last_summary_time,
-    *,
-    attempts,
-    completed,
-    coins,
-    exp,
-    hearts_used,
-    relay_stock,
-    box_counts,
-    now=None,
-):
-    """Send a Telegram summary once every ``TELEGRAM_SUMMARY_INTERVAL`` seconds.
-
-    Returns the new ``last_summary_time`` so the caller can track the next due
-    time.  Does nothing when notifications are disabled.
-    """
-    now = now if now is not None else time.time()
-    if not _is_telegraph_enabled():
-        return last_summary_time
-    if now - last_summary_time < TELEGRAM_SUMMARY_INTERVAL:
-        return last_summary_time
-    send_summary(
-        attempts=attempts,
-        completed=completed,
-        coins=coins,
-        exp=exp,
-        hearts_used=hearts_used,
-        relay_stock=relay_stock,
-        box_counts=box_counts,
-    )
-    return now
 
 
 def _reset_app_or_raise(failure_reason):
