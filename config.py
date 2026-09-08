@@ -10,6 +10,13 @@ TEMPLATE_DIR = str(resource_path("templates"))
 MATCH_THRESHOLD = 0.8
 SESSION_RESET_INTERVAL = (5400, 10800)  # 1.5-3 hours
 NEXT_GAME_DELAY = (0.5, 1.0)  # seconds between completed runs
+
+# Telegram notification settings.  These can also be supplied via the
+# environment variables TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID, which take
+# precedence so sensitive values are never committed to source control.
+TELEGRAM_BOT_TOKEN = ""  # from @BotFather
+TELEGRAM_CHAT_ID = ""    # the chat/channel to send to
+TELEGRAM_SUMMARY_INTERVAL = 7200  # seconds (2 hours) between summary sends
 RELAY_QUICK_EXIT_MIN_WAIT = 1.2  # let the second cookie visibly begin its run
 RELAY_QUICK_EXIT_TIMEOUT = 2.5
 RELAY_QUICK_EXIT_RUNOUT_BUFFER = 0.35
@@ -339,7 +346,7 @@ MAIL_BOX_BUTTON = (686, 677)
 MAIL_BOX_LIVES_TAB_BUTTON = (630, 148)
 MAIL_BOX_CLOSE_BUTTON = (1130, 87)
 QUICK_RECEIVE_AND_SEND_LIVES_BUTTON = (652, 612)
-ACCEPT_ALL_LIVES_RECEIVED_AND_SENT_BUTTON = (640, 462)
+ACCEPT_ALL_LIVES_RECEIVED_AND_SENT_BUTTON = (640, 520)
 CONFIRM_SEND_LIFE_BUTTON = (797, 460)
 LEADERBOARD_TOP_POSITION = (435, 447)
 CLOSE_ANNOUNCEMENT_DIALOG_BUTTON = (1127, 66)

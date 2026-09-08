@@ -2,6 +2,7 @@ import random
 import time
 
 import actions as actions_module
+import notifier
 from adb import device_back, device_capture_screen, device_connect, device_reset_app, device_tap
 from actions import (
     accept_congratulations,
@@ -67,11 +68,13 @@ from config import (
     RESULT_REWARD_TIMEOUT,
     SESSION_RESET_INTERVAL,
     STAGE_TEMPLATES,
+    TELEGRAM_SUMMARY_INTERVAL,
     UNKNOWN_SCREEN_RESET_THRESHOLD,
 )
 from detection import detect_all_template_matches, detect_stage, load_templates
 from debug import save_debug_screen
 from mystery_box_detection import detect_mystery_box_types
+from notifier import send_summary, is_enabled as telegram_enabled
 from result_ocr import read_result_rewards
 
 # -------------------
@@ -337,6 +340,19 @@ def _is_friends_leaderboard_open(screen):
     )
 
 
+def _friends_or_mailbox_ready(screen):
+    """Return True when either a clean Main Menu or the Friends leaderboard is open.
+
+    The one-shot hearts/mailbox workers need the Friends screen (or at least a
+    safe main menu) as their starting point.  The leaderboard shares the
+    MAINMENU header, so checking for MAINMENU alone would reject a fully open
+    Friends list and fail the worker immediately.  Accept both states here.
+    """
+    if screen is None:
+        return False
+    return detect_stage(screen, ("MAINMENU",)) == "MAINMENU" or _is_friends_leaderboard_open(screen)
+
+
 def prompt_user_options():
     desired_boost_template = None
 
@@ -400,7 +416,7 @@ def send_friend_hearts(device_ip=None, device_port=None):
             "this version requires LDPlayer 1280x720."
         )
     load_templates()
-    if detect_stage(initial_screen, ("MAINMENU",)) != "MAINMENU":
+    if not _friends_or_mailbox_ready(initial_screen):
         raise RuntimeError(
             "Main/Friends leaderboard not detected. Open the Friends "
             "leaderboard from the main screen before pressing Send Hearts."
@@ -429,7 +445,7 @@ def receive_and_send_mailbox_hearts(device_ip=None, device_port=None):
             "this version requires LDPlayer 1280x720."
         )
     load_templates()
-    if detect_stage(initial_screen, ("MAINMENU",)) != "MAINMENU":
+    if not _friends_or_mailbox_ready(initial_screen):
         raise RuntimeError(
             "Main/Friends leaderboard not detected. Open the Friends "
             "leaderboard from the main screen before pressing Receive "
@@ -438,7 +454,49 @@ def receive_and_send_mailbox_hearts(device_ip=None, device_port=None):
     processed_count = handle_mailbox_receive_and_send_lives()
     print(f"✅ รับ/ส่งหัวใจจากกล่องจดหมายแล้วทั้งหมด {processed_count} รายการ")
     print(f"[MAILBOX_HEARTS] processed={processed_count}")
+    # Report the mailbox run to Telegram immediately if configured.
+    if notifier.is_enabled():
+        notifier.send_summary(hearts_used=processed_count)
     return processed_count
+
+
+def _is_telegraph_enabled():
+    """Return whether Telegram notifications are configured and enabled."""
+    return telegram_enabled()
+
+
+def _maybe_send_telegram_summary(
+    last_summary_time,
+    *,
+    attempts,
+    completed,
+    coins,
+    exp,
+    hearts_used,
+    relay_stock,
+    box_counts,
+    now=None,
+):
+    """Send a Telegram summary once every ``TELEGRAM_SUMMARY_INTERVAL`` seconds.
+
+    Returns the new ``last_summary_time`` so the caller can track the next due
+    time.  Does nothing when notifications are disabled.
+    """
+    now = now if now is not None else time.time()
+    if not _is_telegraph_enabled():
+        return last_summary_time
+    if now - last_summary_time < TELEGRAM_SUMMARY_INTERVAL:
+        return last_summary_time
+    send_summary(
+        attempts=attempts,
+        completed=completed,
+        coins=coins,
+        exp=exp,
+        hearts_used=hearts_used,
+        relay_stock=relay_stock,
+        box_counts=box_counts,
+    )
+    return now
 
 
 def _reset_app_or_raise(failure_reason):
@@ -451,6 +509,65 @@ def _reset_app_or_raise(failure_reason):
     )
     print(f"[BOT_STOPPED] {message}")
     raise RuntimeError(message)
+
+
+def _send_telegram_summary(*, attempts, completed, coins, exp, hearts_used,
+                           relay_stock, box_counts, force=False):
+    """Send a periodic Telegram summary (no-op unless both token and chat set).
+
+    Reports the four requested metrics: Coins/EXP totals, mailbox hearts
+    (used/remaining), Cookie Relay stock, and Mystery Box counts.  Sends are
+    best-effort and never raise, so a notification failure cannot stop the bot.
+    """
+    if not notifier.is_enabled():
+        return False
+    try:
+        return notifier.send_summary(
+            attempts=attempts,
+            completed=completed,
+            coins=coins,
+            exp=exp,
+            hearts_used=hearts_used,
+            relay_stock=relay_stock,
+            box_counts=box_counts,
+            relay_out_of_stock=bool(relay_stock == 0),
+        )
+    except Exception as exc:
+        print(f"[TELEGRAM] summary send failed: {exc}")
+        return False
+
+
+def _maybe_send_telegram_summary(
+    last_summary_time,
+    *,
+    attempts,
+    completed,
+    coins,
+    exp,
+    hearts_used,
+    relay_stock,
+    box_counts,
+    interval=7200,
+):
+    """Send a Telegram summary every ``interval`` seconds (default 2 hours).
+
+    Returns the updated ``last_summary_time``.  Sending is best-effort and
+    disabled until a bot token + chat id are configured, so the loop is never
+    blocked by a notification call.
+    """
+    now = time.time()
+    if now - last_summary_time < interval:
+        return last_summary_time
+    _send_telegram_summary(
+        attempts=attempts,
+        completed=completed,
+        coins=coins,
+        exp=exp,
+        hearts_used=hearts_used,
+        relay_stock=relay_stock,
+        box_counts=box_counts,
+    )
+    return now
 
 
 def _dismiss_visible_confirm_buttons(screen, max_clicks=8, action_lock=None):
@@ -614,6 +731,11 @@ def main(options=None, device_ip=None, device_port=None):
         completed_run_count = 0
         session_coins = 0
         session_exp = 0
+        hearts_used = 0
+        relay_stock = None
+        box_counts = {"wood": 0, "silver": 0, "gold": 0,
+                      "rainbow": 0, "unknown": 0}
+        last_summary_time = time.time()
         run_durations = RunDurationStats()
         box_stats = BoxSessionStats()
         _print_box_stats(box_stats)
@@ -875,7 +997,7 @@ def main(options=None, device_ip=None, device_port=None):
                 if options["use_fast_start"]:
                     purchase_fast_start()
                 if options["use_cookie_relay"]:
-                    purchase_cookie_relay()
+                    relay_stock = purchase_cookie_relay()
                 if options["use_desired_random_boost"]:
                     purchase_desired_random_boost(options["desired_boost_template"], options["desired_boost_name"])
                 run_durations.start()
@@ -1026,6 +1148,13 @@ def main(options=None, device_ip=None, device_port=None):
                         + ", ".join(detected_box_types)
                     )
                     _print_box_stats(box_stats)
+                    # Keep a running tally so the Telegram summary can report
+                    # total boxes by type without re-reading the screen.
+                    snapshot = box_stats.snapshot()
+                    box_counts = {
+                        name: int(snapshot.get(name, 0))
+                        for name in ("wood", "silver", "gold", "rainbow", "unknown")
+                    }
                 elif not detected_box_types:
                     print(
                         "[BOX] Popup detected, but no boxes could be classified; "
@@ -1212,6 +1341,16 @@ def main(options=None, device_ip=None, device_port=None):
                 print("💤 Detected Stage: INACTIVE")
                 handle_inactive()
                 last_stage = None
+            last_summary_time = _maybe_send_telegram_summary(
+                last_summary_time,
+                attempts=session_run_count,
+                completed=completed_run_count,
+                coins=session_coins,
+                exp=session_exp,
+                hearts_used=hearts_used,
+                relay_stock=relay_stock,
+                box_counts=box_stats.snapshot(),
+            )
             time.sleep(0.25)
     except KeyboardInterrupt:
         print("🛑 Bot stopped by user.")

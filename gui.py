@@ -72,6 +72,8 @@ class CookieRunBotGUI:
         self.box_unknown_detail_var = tk.StringVar(value="ยังไม่พบกล่องในรอบนี้")
         self._session_completed_runs = 0
         self._box_stats_counts = self._empty_box_stats()
+        self.telegram_token_var = tk.StringVar(value="")
+        self.telegram_chat_var = tk.StringVar(value="")
 
         self._create_app_icon()
         self._configure_styles()
@@ -1148,6 +1150,16 @@ class CookieRunBotGUI:
             self.boost_combo.current(max(0, min(boost_index, len(BOOST_CHOICES) - 1)))
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             self._append_log(f"อ่านค่าที่บันทึกไว้ไม่ได้: {exc}\n")
+
+        # Load Telegram credentials from the git-ignored notifier settings file
+        # (separate from gui_settings.json so tokens stay out of source control).
+        try:
+            import notifier as notifier_mod
+            token, chat_id = notifier_mod.get_settings()
+            self.telegram_token_var.set(token)
+            self.telegram_chat_var.set(chat_id)
+        except Exception:
+            pass
 
     def _save_settings(self):
         settings = {

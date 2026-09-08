@@ -89,7 +89,9 @@ class _Mailbox:
             if self.stuck_confirm:
                 # The confirm never clears in the stuck scenario.
                 self.hearts += 1
-        elif point == _center(self.all_done_match):
+        elif point == _center(self.all_done_match) or point == tuple(
+            actions.ACCEPT_ALL_LIVES_RECEIVED_AND_SENT_BUTTON
+        ):
             self.state = "mailbox"  # accept keeps us inside the mailbox
         elif point == tuple(actions.MAIL_BOX_CLOSE_BUTTON):
             self.state = "closed"
@@ -118,7 +120,7 @@ class MailboxHeartsActionTests(unittest.TestCase):
         self.assertIn(tuple(actions.MAIL_BOX_LIVES_TAB_BUTTON), mailbox.taps)
         self.assertIn(tuple(actions.QUICK_RECEIVE_AND_SEND_LIVES_BUTTON), mailbox.taps)
         self.assertIn(_center(mailbox.confirm_match), mailbox.taps)
-        self.assertIn(_center(mailbox.all_done_match), mailbox.taps)
+        self.assertIn(tuple(actions.ACCEPT_ALL_LIVES_RECEIVED_AND_SENT_BUTTON), mailbox.taps)
         self.assertEqual(mailbox.taps[-1], tuple(actions.MAIL_BOX_CLOSE_BUTTON))
 
     def test_no_lives_closes_without_pressing_receive_all(self):
@@ -170,17 +172,20 @@ class MailboxHeartsActionTests(unittest.TestCase):
 
         self.assertEqual(mailbox.state, "leaderboard")
 
-    def test_stops_safely_when_confirm_never_clears(self):
+    def test_finishes_cleanly_when_confirm_never_clears(self):
         mailbox = _Mailbox(hearts=2, stuck_confirm=True)
 
-        with self.assertRaisesRegex(RuntimeError, "did not clear"):
-            actions.handle_mailbox_receive_and_send_lives(
-                capture_func=mailbox.capture,
-                detect_func=mailbox.detect,
-                tap_func=mailbox.tap,
-                sleep_func=lambda _seconds: None,
-                confirm_poll_attempts=2,
-            )
+        # A frozen UI should not raise: count what was handled and finish.
+        processed = actions.handle_mailbox_receive_and_send_lives(
+            capture_func=mailbox.capture,
+            detect_func=mailbox.detect,
+            tap_func=mailbox.tap,
+            sleep_func=lambda _seconds: None,
+            confirm_poll_attempts=2,
+        )
+
+        self.assertEqual(processed, 0)
+        self.assertEqual(mailbox.taps[-1], tuple(actions.MAIL_BOX_CLOSE_BUTTON))
 
 
 class MailboxHeartsBotEntryTests(unittest.TestCase):

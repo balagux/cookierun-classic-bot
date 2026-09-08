@@ -126,12 +126,15 @@ def purchase_cookie_relay():
     safe_device_tap(DEVICE_IP, DEVICE_PORT, COOKIE_RELAY_ITEM[0], COOKIE_RELAY_ITEM[1])
     time.sleep(random.uniform(0.8, 1.4))
     screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
-    if not cookie_relay_has_stock(screen):
+    has_stock = cookie_relay_has_stock(screen)
+    if not has_stock:
         print("🛒 Cookie Relay stock is 0 — purchasing one...")
         safe_device_tap(DEVICE_IP, DEVICE_PORT, PURCHASE_BUTTON[0], PURCHASE_BUTTON[1])
         time.sleep(random.uniform(1, 2))
-    else:
-        print("✅ Cookie Relay is already in stock — skipping purchase.")
+        # After buying, one relay is available again (until the run consumes it).
+        return 1
+    print("✅ Cookie Relay is already in stock — skipping purchase.")
+    return 1
 
 
 def cookie_relay_has_stock(screen):
@@ -1176,18 +1179,28 @@ def handle_send_friend_life(
 
 
 def _mailbox_entry_visible(screen, detect_func=detect_all_template_matches):
-    """Return True when the Friends leaderboard (with its mailbox icon) is open."""
+    """Return True when the Friends leaderboard (with its mailbox icon) is open.
+
+    This mirrors ``has_ready_leaderboard``: any leaderboard evidence (top
+    header, send-life envelope, or bottom marker) means the Friends list is
+    open.  Requiring the top header alone rejected versions of the game whose
+    header template did not match, so the send-hearts button worked while the
+    mailbox worker failed immediately.
+    """
     if screen is None:
         return False
-    top_matches = detect_func(
-        screen,
-        FRIEND_TOP_LEADERBOARD_TEMPLATE,
-        FRIEND_TOP_LEADERBOARD_REGION,
+    evidence = (
+        detect_func(screen, FRIEND_TOP_LEADERBOARD_TEMPLATE, FRIEND_TOP_LEADERBOARD_REGION),
+        detect_func(screen, FRIEND_SEND_LIFE_TEMPLATE, FRIEND_SEND_LIFE_REGION),
+        detect_func(screen, FRIEND_BOTTOM_LEADERBOARD_TEMPLATE, FRIEND_BOTTOM_LEADERBOARD_REGION),
     )
-    return bool(top_matches) and any(
-        _friend_match_mean_brightness(screen, match) >= 175.0
-        for match in top_matches
-    )
+    if not any(evidence):
+        return False
+    # A fully dark screen (device off / app closed) must never count.
+    for match in (evidence[0] or evidence[1] or evidence[2]):
+        if _friend_match_mean_brightness(screen, match) > 70.0:
+            return True
+    return False
 
 
 def handle_mailbox_receive_and_send_lives(
@@ -1197,9 +1210,12 @@ def handle_mailbox_receive_and_send_lives(
     tap_func=None,
     sleep_func=None,
     max_open_attempts=6,
-    max_total_iterations=200,
+    # A full mailbox can hold 100-200 hearts, so allow a generous iteration
+    # budget before declaring the safety limit reached.
+    max_total_iterations=300,
     confirm_poll_attempts=6,
     progress_poll_attempts=8,
+    tap_interval=0.55,
 ):
     """Receive mailbox hearts and send lives back, one green Confirm at a time.
 
@@ -1312,18 +1328,28 @@ def handle_mailbox_receive_and_send_lives(
             total_iterations += 1
             screen = capture_or_raise()
 
+            # The mailbox ran out of hearts (or the game dropped to a dark
+            # screen) and the Lives panel is no longer visible.  Stop instead
+            # of re-tapping "Quick Receive and Send Lives" forever.
+            if not _mailbox_window_open(screen):
+                print(
+                    "✉️ Mailbox Lives panel is no longer visible; "
+                    f"stopping after {processed_count} processed heart(s)."
+                )
+                break
+
             all_done = matches(
                 screen,
                 ALL_LIVES_RECEIVED_AND_SENT_TEMPLATE,
                 ALL_LIVES_RECEIVED_AND_SENT_REGION,
             )
             if all_done:
-                accept_x, accept_y, accept_width, accept_height = all_done[0]
+                # "All Lives received and sent!" uses its own green Confirm in
+                # the middle of the dialog, not the per-friend Confirm.  Use the
+                # dedicated coordinate so the tap lands on the actual button.
                 print("✉️ All mailbox lives received and sent. Confirming...")
-                tap_func(
-                    accept_x + accept_width // 2,
-                    accept_y + accept_height // 2,
-                )
+                accept_x, accept_y = ACCEPT_ALL_LIVES_RECEIVED_AND_SENT_BUTTON[:2]
+                tap_func(accept_x, accept_y)
                 sleep_func(0.4)
                 break
 
@@ -1338,33 +1364,51 @@ def handle_mailbox_receive_and_send_lives(
                     key=lambda match: (match[1], match[0]),
                 )[0]
                 print(f"✉️ Confirming mailbox heart #{processed_count + 1}...")
-                tap_func(
-                    confirm_x + confirm_width // 2,
-                    confirm_y + confirm_height // 2,
-                )
-                # Wait until the green Confirm really clears before counting it.
+                # Tap the detected Confirm, then wait for it to clear.  A frozen
+                # game UI (common when opening many dialogs quickly) can swallow
+                # the first tap, so retry a couple of times before giving up.
                 confirmation_cleared = False
-                for _ in range(max(1, int(confirm_poll_attempts))):
-                    sleep_func(0.15)
-                    screen = capture_or_raise()
-                    remaining = matches(
-                        screen,
-                        CONFIRM_SEND_LIFE_TEMPLATE,
-                        CONFIRM_SEND_LIFE_REGION,
+                for tap_attempt in range(1, 3):
+                    tap_func(
+                        confirm_x + confirm_width // 2,
+                        confirm_y + confirm_height // 2,
                     )
-                    if not remaining:
-                        confirmation_cleared = True
+                    for _ in range(max(1, int(confirm_poll_attempts))):
+                        sleep_func(0.15)
+                        screen = capture_or_raise()
+                        remaining = matches(
+                            screen,
+                            CONFIRM_SEND_LIFE_TEMPLATE,
+                            CONFIRM_SEND_LIFE_REGION,
+                        )
+                        if not remaining:
+                            confirmation_cleared = True
+                            break
+                    if confirmation_cleared:
                         break
+                    print(
+                        f"✉️ Confirm did not clear (tap {tap_attempt}/2); "
+                        "retrying..."
+                    )
+                    if tap_attempt == 1:
+                        # A modal may still be animating in; give it more time.
+                        sleep_func(0.4)
+                # Always leave a short pause between processed hearts so the
+                # game UI does not get spammed and freeze (100-200 hearts need
+                # a gentle cadence to stay responsive).
+                sleep_func(float(tap_interval))
                 if not confirmation_cleared:
                     try:
                         save_debug_screen(screen)
                     except Exception as exc:
                         print(f"⚠️ Could not save mailbox screenshot: {exc}")
-                    raise RuntimeError(
-                        "The mailbox Confirm did not clear after tapping it. "
-                        f"Stopped safely after {processed_count} mailbox "
-                        "heart(s)."
+                    # Do not throw: a frozen UI should not permanently break the
+                    # worker.  Count what we already handled and finish cleanly.
+                    print(
+                        "⚠️ Mailbox confirm appears frozen; finishing with "
+                        f"{processed_count} processed heart(s)."
                     )
+                    break
                 processed_count += 1
                 stalled_frames = 0
                 continue
@@ -1517,6 +1561,19 @@ def _region_mean_brightness(screen, region):
     if roi.size == 0:
         return 0.0
     return float(cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)[:, :, 2].mean())
+
+
+def _mailbox_window_open(screen):
+    """Return True when the in-game Mailbox dialog (Lives tab) is on screen.
+
+    The Lives tab shows rows of green "Receive & Send" buttons over a bright
+    beige panel, with a teal header.  When the mailbox runs dry or the game
+    freezes back to a dark/home screen this panel dims, so requiring a minimum
+    brightness of the send region lets the worker stop instead of looping.
+    """
+    if screen is None or not hasattr(screen, "shape"):
+        return False
+    return _region_mean_brightness(screen, FRIEND_SEND_LIFE_REGION) >= 70.0
 
 
 def main_menu_start_area_clear(screen):

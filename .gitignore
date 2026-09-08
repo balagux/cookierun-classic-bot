@@ -179,5 +179,6 @@ debug_screens/
 recordings/
 gui_settings.json
 installer/*.exe
+telegram_settings.json
 *.log
 .DS_Store

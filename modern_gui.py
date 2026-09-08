@@ -1,8 +1,11 @@
+import threading
+
 import customtkinter as ctk
 from PIL import Image, ImageDraw, ImageTk
 
 from bot import BOOST_CHOICES
 from gui import CookieRunBotGUI
+import notifier
 
 
 BG = "#F4F5FA"
@@ -458,6 +461,7 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         workspace_tabs.grid(row=1, column=0, sticky="nsew")
         overview_tab = workspace_tabs.add("ภาพรวม")
         boxes_tab = workspace_tabs.add("สถิติกล่อง")
+        notify_tab = workspace_tabs.add("การแจ้งเตือน")
         workspace_tabs.set("ภาพรวม")
         self.workspace_tabs = workspace_tabs
 
@@ -727,6 +731,7 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         self.log.configure(state="disabled")
         self._append_log("READY  •  ตั้งค่าไอเทม แล้วทดสอบ ADB ก่อนเริ่ม\n")
         self._build_box_stats_tab(boxes_tab)
+        self._build_notify_tab(notify_tab)
 
     def _build_box_stats_tab(self, parent):
         parent.grid_columnconfigure(0, weight=1)
@@ -798,6 +803,157 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             font=self._font(9),
             anchor="w",
         ).pack(fill="x", padx=12, pady=8)
+
+    def _build_notify_tab(self, parent):
+        """Build the Telegram notification settings tab."""
+        parent.grid_columnconfigure(0, weight=1)
+        parent.grid_rowconfigure(0, weight=1)
+        body = ctk.CTkScrollableFrame(
+            parent,
+            corner_radius=0,
+            border_width=0,
+            fg_color=BG,
+            scrollbar_button_color="#D9DCE7",
+            scrollbar_button_hover_color="#C9CDD9",
+        )
+        body.grid(row=0, column=0, sticky="nsew", padx=(12, 4), pady=(8, 7))
+        body.grid_columnconfigure(0, weight=1)
+
+        card = ctk.CTkFrame(
+            body,
+            corner_radius=16,
+            fg_color=CARD,
+            border_width=1,
+            border_color=BORDER,
+        )
+        card.grid(row=0, column=0, sticky="nsew")
+        self._section_header(
+            card,
+            "tap",
+            "การแจ้งเตือน Telegram",
+            "รับสรุป Coins/EXP, หัวใจ, Relay และกล่อง ทุก 2 ชั่วโมง",
+        )
+
+        form = ctk.CTkFrame(card, fg_color="transparent")
+        form.pack(fill="x", padx=16, pady=(0, 13))
+        form.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(
+            form, text="Bot Token", text_color=MUTED, font=self._font(9, "bold")
+        ).grid(row=0, column=0, sticky="w", padx=(0, 8), pady=(0, 6))
+        self.telegram_token_entry = ctk.CTkEntry(
+            form,
+            height=36,
+            corner_radius=10,
+            border_width=1,
+            border_color=BORDER,
+            fg_color="#F8F8FC",
+            text_color=TEXT,
+            show="•",
+            textvariable=self.telegram_token_var,
+        )
+        self.telegram_token_entry.grid(
+            row=0, column=1, sticky="ew", pady=(0, 6)
+        )
+
+        ctk.CTkLabel(
+            form, text="Chat ID", text_color=MUTED, font=self._font(9, "bold")
+        ).grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(0, 12))
+        self.telegram_chat_entry = ctk.CTkEntry(
+            form,
+            height=36,
+            corner_radius=10,
+            border_width=1,
+            border_color=BORDER,
+            fg_color="#F8F8FC",
+            text_color=TEXT,
+            textvariable=self.telegram_chat_var,
+        )
+        self.telegram_chat_entry.grid(row=1, column=1, sticky="ew", pady=(0, 12))
+
+        actions = ctk.CTkFrame(card, fg_color="transparent")
+        actions.pack(fill="x", padx=16, pady=(0, 14))
+        actions.grid_columnconfigure((0, 1), weight=1)
+        self.telegram_save_button = ctk.CTkButton(
+            actions,
+            height=38,
+            corner_radius=10,
+            text="บันทึก",
+            fg_color=PURPLE,
+            hover_color=PURPLE_HOVER,
+            text_color="#FFFFFF",
+            font=self._font(10, "bold"),
+            command=self._save_telegram_settings,
+        )
+        self.telegram_save_button.grid(
+            row=0, column=0, sticky="ew", padx=(0, 5)
+        )
+        self.telegram_test_button = ctk.CTkButton(
+            actions,
+            height=38,
+            corner_radius=10,
+            text="ทดสอบส่ง",
+            fg_color="#F0F1F6",
+            hover_color="#E6E7EF",
+            text_color="#555A6E",
+            font=self._font(10, "bold"),
+            command=self._test_telegram,
+        )
+        self.telegram_test_button.grid(
+            row=0, column=1, sticky="ew", padx=(5, 0)
+        )
+
+        hint = ctk.CTkFrame(card, corner_radius=11, fg_color="#F0F4FB")
+        hint.pack(fill="x", padx=16, pady=(0, 14))
+        ctk.CTkLabel(
+            hint,
+            text=(
+                "สร้างบอทที่ @BotFather แล้วกด Start ที่บอทก่อน "
+                "ค่าจะเก็บไว้ในเครื่องเท่านั้น (ไม่ส่งขึ้น git)"
+            ),
+            text_color="#4C6690",
+            font=self._font(9),
+            anchor="w",
+            justify="left",
+            wraplength=420,
+        ).pack(fill="x", padx=12, pady=10)
+
+    def _save_telegram_settings(self):
+        """Persist Telegram token/chat id to the git-ignored settings file."""
+        token = self.telegram_token_var.get().strip()
+        chat_id = self.telegram_chat_var.get().strip()
+        try:
+            import notifier as notifier_mod
+            saved = notifier_mod.save_settings(token, chat_id)
+            self._append_log(
+                ("✅ บันทึกการแจ้งเตือน Telegram แล้ว\n" if saved
+                 else "⚠️ บันทึกการแจ้งเตือนไม่สำเร็จ\n")
+            )
+            self._set_status("บันทึกแจ้งเตือนแล้ว", "success" if saved else "error")
+        except Exception as exc:
+            self._append_log(f"⚠️ บันทึกแจ้งเตือนผิดพลาด: {exc}\n")
+            self._set_status("บันทึกไม่สำเร็จ", "error")
+
+    def _test_telegram(self):
+        """Send a test Telegram message in a background thread."""
+        token = self.telegram_token_var.get().strip()
+        chat_id = self.telegram_chat_var.get().strip()
+        try:
+            import notifier as notifier_mod
+            notifier_mod.save_settings(token, chat_id)
+        except Exception as exc:
+            self._append_log(f"⚠️ ตั้งค่า Telegram ผิดพลาด: {exc}\n")
+            return
+        self._append_log("📤 กำลังส่งข้อความทดสอบ Telegram...\n")
+        self._set_status("กำลังทดสอบส่ง...", "testing")
+        threading.Thread(target=self._run_telegram_test, daemon=True).start()
+
+    def _run_telegram_test(self):
+        import notifier as notifier_mod
+        ok = notifier_mod.send_message(
+            "✅ การแจ้งเตือน CookieRun Bot ทำงานปกติ"
+        )
+        self.events.put(("telegram_test", ok))
 
     def _session_summary_tile(
         self,
