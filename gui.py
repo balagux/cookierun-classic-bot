@@ -265,7 +265,7 @@ class CookieRunBotGUI:
         ).pack(anchor="w")
         tk.Label(
             brand_copy,
-            text="CLASSIC  •  v1.4.10",
+            text="CLASSIC  •  v1.4.11",
             bg="#171a2e",
             fg="#797e9b",
             font=("Segoe UI Semibold", 8),
@@ -600,6 +600,40 @@ class CookieRunBotGUI:
         )
         self._launch_process(command, "hearts")
 
+    def _send_mailbox_hearts(self):
+        """Run the mailbox receive/send worker as a separate process."""
+        if self.process is not None and self.process.poll() is None:
+            return
+        try:
+            command = self._base_command("--mailbox-hearts")
+        except ValueError as exc:
+            messagebox.showerror("ข้อมูลไม่ถูกต้อง", str(exc), parent=self.root)
+            return
+
+        self._heart_sent_count = None
+        self._append_log(
+            "\nรับหัวใจจากกล่องจดหมาย: เปิดหน้า Friends (เห็นปุ่มกล่องจดหมาย) "
+            "แล้วกดปุ่มนี้\n"
+        )
+        self._launch_process(command, "mailbox")
+
+    @staticmethod
+    def _hearts_activity(mode):
+        """Human-readable activity name for the hearts/mailbox worker modes."""
+        return "รับหัวใจจากกล่องจดหมาย" if mode == "mailbox" else "ส่งหัวใจ"
+
+    @staticmethod
+    def _is_hearts_mode(mode):
+        return mode in ("hearts", "mailbox")
+
+    def _hearts_status(self, mode, count=None):
+        """Status text shown after a hearts/mailbox worker finishes."""
+        if count is not None and mode == "mailbox":
+            return f"รับหัวใจจากกล่องจดหมายแล้ว {count} รายการ"
+        if count is not None:
+            return f"ส่งหัวใจแล้ว {count} คน"
+        return f"{self._hearts_activity(mode)}เสร็จแล้ว" if mode == "mailbox" else "ส่งหัวใจเสร็จแล้ว"
+
     def _append_play_options(self, command):
         if self.fast_start_var.get():
             command.append("--fast-start")
@@ -636,13 +670,14 @@ class CookieRunBotGUI:
                 env=env,
             )
         except OSError as exc:
-            activity = "ส่งหัวใจ" if mode == "hearts" else "บอท"
+            activity = self._hearts_activity(mode) if self._is_hearts_mode(mode) else "บอท"
             self._append_log(f"เริ่ม{activity}ไม่สำเร็จ: {exc}\n")
             self._set_status("เริ่มไม่สำเร็จ", "error")
             return
 
-        if mode == "hearts":
-            self._append_log("──────── เริ่มส่งหัวใจทีละคน ────────\n")
+        if self._is_hearts_mode(mode):
+            activity = self._hearts_activity(mode)
+            self._append_log(f"──────── เริ่ม{activity} ────────\n")
         else:
             self._append_log("\n──────── เริ่มการทำงาน ────────\n")
         self.process_mode = mode
@@ -650,7 +685,10 @@ class CookieRunBotGUI:
             self._begin_bot_session()
         self.stop_requested = False
         self._set_running_controls(True)
-        self._set_status("กำลังส่งหัวใจ..." if mode == "hearts" else "บอทกำลังทำงาน", "running")
+        if self._is_hearts_mode(mode):
+            self._set_status(f"กำลัง{self._hearts_activity(mode)}...", "running")
+        else:
+            self._set_status("บอทกำลังทำงาน", "running")
         if worker_log is not None:
             reader = self._read_bot_log
             reader_args = (self.process, worker_log)
@@ -703,7 +741,7 @@ class CookieRunBotGUI:
         self.stop_requested = True
         self._set_status("กำลังหยุด...", "testing")
         self.stop_button.configure(state="disabled")
-        activity = "การส่งหัวใจ" if self.process_mode == "hearts" else "บอท"
+        activity = self._hearts_activity(self.process_mode) if self._is_hearts_mode(self.process_mode) else "บอท"
         self._append_log(f"กำลังส่งคำสั่งหยุด{activity}...\n")
         threading.Thread(target=self._terminate_process, args=(process,), daemon=True).start()
 
@@ -729,6 +767,9 @@ class CookieRunBotGUI:
         self.test_button.configure(state="disabled")
         self.start_button.configure(state="disabled")
         self.send_hearts_button.configure(state="disabled")
+        mailbox_button = getattr(self, "mailbox_hearts_button", None)
+        if mailbox_button is not None:
+            mailbox_button.configure(state="disabled")
         self._set_status("กำลังทดสอบ ADB...", "testing")
         self._append_log("\nกำลังทดสอบการเชื่อมต่อ ADB...\n")
         threading.Thread(target=self._run_connection_test, args=(command,), daemon=True).start()
@@ -790,35 +831,40 @@ class CookieRunBotGUI:
                     if self.process_mode == "bot":
                         self._update_session_stats(payload)
                         self._update_box_stats(payload)
-                    elif self.process_mode == "hearts":
+                    elif self._is_hearts_mode(self.process_mode):
                         heart_match = re.search(r"\[HEARTS\]\s+sent=(\d+)", payload)
                         if heart_match:
                             self._heart_sent_count = int(heart_match.group(1))
+                            continue
+                        mailbox_match = re.search(r"\[MAILBOX_HEARTS\]\s+processed=(\d+)", payload)
+                        if mailbox_match:
+                            self._heart_sent_count = int(mailbox_match.group(1))
                 elif event == "bot_exit":
                     process, return_code = payload
                     if process is self.process:
                         finished_mode = self.process_mode
+                        hearts_mode = self._is_hearts_mode(finished_mode)
                         elapsed_text = self._finish_bot_session() if finished_mode == "bot" else None
                         self.process = None
                         self.process_mode = None
                         self._set_running_controls(False)
                         if self.stop_requested:
-                            status = "หยุดส่งหัวใจแล้ว" if finished_mode == "hearts" else "หยุดแล้ว"
+                            status = f"หยุด{self._hearts_activity(finished_mode)}แล้ว" if hearts_mode else "หยุดแล้ว"
                             self._set_status(status, "idle")
                             duration_note = f" • ใช้เวลา {elapsed_text}" if elapsed_text else ""
-                            activity = "หยุดส่งหัวใจแล้ว" if finished_mode == "hearts" else "บอทหยุดทำงานแล้ว"
+                            activity = f"หยุด{self._hearts_activity(finished_mode)}แล้ว" if hearts_mode else "บอทหยุดทำงานแล้ว"
                             self._append_log(f"──────── {activity}{duration_note} ────────\n")
                         elif return_code == 0:
-                            if finished_mode == "hearts" and self._heart_sent_count is not None:
-                                status = f"ส่งหัวใจแล้ว {self._heart_sent_count} คน"
+                            if hearts_mode and self._heart_sent_count is not None:
+                                status = self._hearts_status(finished_mode, self._heart_sent_count)
                             else:
-                                status = "ส่งหัวใจเสร็จแล้ว" if finished_mode == "hearts" else "หยุดแล้ว"
-                            self._set_status(status, "success" if finished_mode == "hearts" else "idle")
+                                status = self._hearts_status(finished_mode) if hearts_mode else "หยุดแล้ว"
+                            self._set_status(status, "success" if hearts_mode else "idle")
                             duration_note = f" • ใช้เวลา {elapsed_text}" if elapsed_text else ""
-                            activity = "ส่งหัวใจเสร็จแล้ว" if finished_mode == "hearts" else "บอทหยุดทำงานแล้ว"
+                            activity = f"{self._hearts_activity(finished_mode)}เสร็จแล้ว" if hearts_mode else "บอทหยุดทำงานแล้ว"
                             self._append_log(f"──────── {activity}{duration_note} ────────\n")
                         else:
-                            status = "ส่งหัวใจไม่สำเร็จ" if finished_mode == "hearts" else "บอทหยุดด้วยข้อผิดพลาด"
+                            status = "ส่งหัวใจไม่สำเร็จ" if finished_mode == "hearts" else ("รับหัวใจไม่สำเร็จ" if finished_mode == "mailbox" else "บอทหยุดด้วยข้อผิดพลาด")
                             self._set_status(status, "error")
                             duration_note = f" • ใช้เวลา {elapsed_text}" if elapsed_text else ""
                             self._append_log(
@@ -831,6 +877,9 @@ class CookieRunBotGUI:
                     self.test_button.configure(state="normal")
                     self.start_button.configure(state="normal")
                     self.send_hearts_button.configure(state="normal")
+                    mailbox_button = getattr(self, "mailbox_hearts_button", None)
+                    if mailbox_button is not None:
+                        mailbox_button.configure(state="normal")
                     self._append_log(output)
                     if return_code == 0:
                         self._set_status("เชื่อมต่อสำเร็จ", "success")
@@ -846,6 +895,9 @@ class CookieRunBotGUI:
     def _set_running_controls(self, running):
         self.start_button.configure(state="disabled" if running else "normal")
         self.send_hearts_button.configure(state="disabled" if running else "normal")
+        mailbox_button = getattr(self, "mailbox_hearts_button", None)
+        if mailbox_button is not None:
+            mailbox_button.configure(state="disabled" if running else "normal")
         self.stop_button.configure(state="normal" if running else "disabled")
         self.test_button.configure(state="disabled" if running else "normal")
         state = "disabled" if running else "normal"
@@ -1119,7 +1171,11 @@ class CookieRunBotGUI:
 
     def _on_close(self):
         running = self.process is not None and self.process.poll() is None
-        running_activity = "การส่งหัวใจ" if self.process_mode == "hearts" else "บอท"
+        running_activity = (
+            f"การ{self._hearts_activity(self.process_mode)}"
+            if self._is_hearts_mode(self.process_mode)
+            else "บอท"
+        )
         if running and not messagebox.askyesno(
             "ปิดโปรแกรม",
             f"{running_activity}ยังทำงานอยู่ ต้องการหยุดและปิดโปรแกรมหรือไม่?",

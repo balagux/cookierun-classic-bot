@@ -46,6 +46,8 @@ STAGE_TOO_MANY_TREASURES_TEMPLATE = ["TOO_MANY_TREASURES_1.png"]
 STAGE_OVERTAKE_BREAK_SCORE_TEMPLATE = ["OVERTAKE_BREAK_SCORE_1.png"]
 STAGE_PARTY_RUN_TEMPLATE = ["PARTY_RUN_1.png"]
 STAGE_ANNOUNCEMENT_TEMPLATE = ["DAILY_NEW_1.png"]
+STAGE_NEWS_TEMPLATE = ["NEWS_TITLE_1.png"]
+STAGE_NEWS_CLOSE_TEMPLATE = ["NEWS_CLOSE_1.png"]
 
 # -------------------
 # STAGE DETECTION REGIONS
@@ -79,6 +81,9 @@ STAGE_TOO_MANY_TREASURES_REGION = (345, 145, 940, 485)
 STAGE_OVERTAKE_BREAK_SCORE_REGION = (479, 64, 799, 132)
 STAGE_PARTY_RUN_REGION = (359, 44, 922, 138)
 STAGE_ANNOUNCEMENT_REGION = (432, 12, 849, 78)
+# "News" popup: the teal header wordmark, and the dark X button in the corner.
+STAGE_NEWS_REGION = (520, 20, 760, 78)
+NEWS_CLOSE_REGION = (1093, 23, 1165, 95)
 
 # Result screen reward-number regions. More than one crop is kept because
 # LDPlayer can shift the game viewport by a few pixels while remaining 1280x720.
@@ -168,6 +173,7 @@ STAGE_TEMPLATES = {
     "MAINMENU":                STAGE_MAINMENU_TEMPLATE,
     "PARTY_RUN":               STAGE_PARTY_RUN_TEMPLATE,
     "ANNOUNCEMENT":            STAGE_ANNOUNCEMENT_TEMPLATE,
+    "NEWS":                    STAGE_NEWS_TEMPLATE,
     "PURCHASE_ITEM":           STAGE_PURCHASE_ITEM_TEMPLATE,
     "LEVEL_UP":                STAGE_LEVEL_UP_TEMPLATE,
     "DAILY_CHECKIN":           STAGE_DAILY_CHECKIN_TEMPLATE,
@@ -202,6 +208,7 @@ STAGE_REGIONS = {
     "PREVIOUS_RANK_RESULTS":   STAGE_PREVIOUS_RANK_RESULTS_REGION,
     "TOO_MANY_TREASURES":      STAGE_TOO_MANY_TREASURES_REGION,
     "ANNOUNCEMENT":            STAGE_ANNOUNCEMENT_REGION,
+    "NEWS":                    STAGE_NEWS_REGION,
 }
 
 # -------------------
@@ -211,6 +218,7 @@ DETECTION_ALWAYS_STAGES = (
     "ANTI_BOT",
     "CONNECTION_LOST",
     "INACTIVE",
+    "NEWS",
 )
 
 DETECTION_GROUP_PRE_GAME = (
@@ -227,6 +235,7 @@ DETECTION_GROUP_PRE_GAME = (
     "TOO_MANY_TREASURES",
     "PARTY_RUN",
     "ANNOUNCEMENT",
+    "NEWS",
     "MAINMENU",
     "PURCHASE_ITEM",
 )
@@ -236,6 +245,7 @@ DETECTION_GROUP_IN_GAME = (
     "GAME_RELAY",
     "GAME_COMPLETE",
     "ANNOUNCEMENT",
+    "NEWS",
     "MAINMENU",  # recover immediately when a run returns to the main menu
 )
 
@@ -257,6 +267,7 @@ DETECTION_GROUP_POST_GAME = (
     "ENTER_LEAGUE",
     "PARTY_RUN",
     "ANNOUNCEMENT",
+    "NEWS",
     "MAINMENU",
 )
 
@@ -333,6 +344,30 @@ CONFIRM_SEND_LIFE_BUTTON = (797, 460)
 LEADERBOARD_TOP_POSITION = (435, 447)
 CLOSE_ANNOUNCEMENT_DIALOG_BUTTON = (1127, 66)
 EXIT_PARTY_RUN_MODE_BUTTON = (1214, 89)
+
+# Candidate X-close positions for modal popups (event windows, notices).
+# Popups share the same glyph but place it at different offsets depending on
+# window width, so a dismiss sweep tries each candidate and verifies between
+# taps instead of trusting one fixed coordinate.
+POPUP_CLOSE_X_CANDIDATES = (
+    (1127, 66),   # daily-new / announcement style popup
+    (1214, 89),   # party-run / full-width event style popup
+    (1130, 87),   # mailbox style popup
+)
+POPUP_CLOSE_VERIFY_STAGES = ("ANNOUNCEMENT", "DAILY_NEW", "PARTY_RUN", "NEWS")
+ANNOUNCEMENT_MAX_FAILURES = 2  # reset the app after this many failed close sweeps
+UNKNOWN_SCREEN_RESET_THRESHOLD = 2  # reset after this many failed BACK recoveries
+MAIN_MENU_START_STALL_LIMIT = 2  # X sweep after this many stuck START presses
+
+# The "News" popup (Mango Sticky Rice update banner) uses its own X button in
+# the teal header corner, distinct from the generic announcement X positions.
+NEWS_CLOSE_BUTTON = (1125, 55)
+
+# Bottom-right area holding the START/Play button on the clean main menu.  A
+# modal popup dims everything behind it, so this region being bright means the
+# menu is clear to start a run; being dark means an overlay is covering it.
+MAIN_MENU_START_REGION = (830, 585, 1085, 700)
+MAIN_MENU_START_MIN_BRIGHTNESS = 120.0
 
 # -------------------
 # ANTI-BOT CAPTCHA

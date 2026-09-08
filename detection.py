@@ -51,6 +51,11 @@ def load_templates():
             _get_template_gray(filename)
     for filename in GLOBAL_CONFIRM_TEMPLATE:
         _get_template_gray(filename)
+    # NEWS popup templates are only reachable via the detection groups, but
+    # they are cheap to pre-warm so the first News screen never delays a tap.
+    from config import STAGE_NEWS_CLOSE_TEMPLATE
+    for filename in STAGE_NEWS_CLOSE_TEMPLATE:
+        _get_template_gray(filename)
 
 
 def _normalize(img):

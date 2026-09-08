@@ -21,7 +21,7 @@ if _worker_log_path:
     except OSError:
         _worker_log_stream = None
 
-from bot import BOOST_CHOICES, main as run_bot, send_friend_hearts
+from bot import BOOST_CHOICES, main as run_bot, receive_and_send_mailbox_hearts, send_friend_hearts
 from config import DEVICE_IP, DEVICE_PORT
 
 
@@ -47,6 +47,7 @@ def build_parser():
     mode.add_argument("--console", action="store_true", help="run with the original terminal prompts")
     mode.add_argument("--run-bot", action="store_true", help=argparse.SUPPRESS)
     mode.add_argument("--send-hearts", action="store_true", help=argparse.SUPPRESS)
+    mode.add_argument("--mailbox-hearts", action="store_true", help=argparse.SUPPRESS)
     mode.add_argument("--check-connection", action="store_true", help=argparse.SUPPRESS)
     mode.add_argument("--check-ocr-runtime", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--device-ip", default=DEVICE_IP)
@@ -124,6 +125,17 @@ def main(argv=None):
             return 0
         except Exception as exc:
             print(f"❌ Sending hearts stopped safely: {exc}")
+            return 1
+
+    if args.mailbox_hearts:
+        try:
+            receive_and_send_mailbox_hearts(
+                device_ip=args.device_ip,
+                device_port=args.device_port,
+            )
+            return 0
+        except Exception as exc:
+            print(f"❌ Mailbox hearts stopped safely: {exc}")
             return 1
 
     if args.console:

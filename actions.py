@@ -3,7 +3,13 @@ import time
 
 import cv2
 
-from adb import device_capture_screen, device_scroll, device_tap, safe_device_tap
+from adb import (
+    device_back,
+    device_capture_screen,
+    device_scroll,
+    device_tap,
+    safe_device_tap,
+)
 from config import (
     ACCEPT_ALL_LIVES_RECEIVED_AND_SENT_BUTTON,
     ACCEPT_CONGRATULATIONS_BUTTON,
@@ -47,13 +53,18 @@ from config import (
     MAIL_BOX_BUTTON,
     MAIL_BOX_LIVES_TAB_BUTTON,
     MAIL_BOX_CLOSE_BUTTON,
+    MAIN_MENU_START_MIN_BRIGHTNESS,
+    MAIN_MENU_START_REGION,
     MULTI_BUY_BUTTON,
     MULTI_PURCHASE_BUTTON,
+    NEWS_CLOSE_BUTTON,
     NO_LIVES_TO_RECEIVE_REGION,
     NO_LIVES_TO_RECEIVE_TEMPLATE,
     PLAY_BUTTON,
     PAUSE_GAME_BUTTON,
     PAUSE_QUIT_BUTTON_REGION,
+    POPUP_CLOSE_VERIFY_STAGES,
+    POPUP_CLOSE_X_CANDIDATES,
     PURCHASE_BUTTON,
     QUIT_GAME_BUTTON,
     QUIT_BUTTON_COLOR_RATIO,
@@ -83,6 +94,7 @@ from detection import (
     detect_anti_bot_odd_cards,
     detect_stage,
 )
+from debug import save_debug_screen
 from config import (
     ANTI_BOT_CARD_POS_1, ANTI_BOT_CARD_POS_2, ANTI_BOT_CARD_POS_3,
     ANTI_BOT_CARD_POS_4, ANTI_BOT_CARD_POS_5, ANTI_BOT_CARD_POS_6,
@@ -1163,72 +1175,398 @@ def handle_send_friend_life(
         sent_centers_since_scroll.clear()
 
 
+def _mailbox_entry_visible(screen, detect_func=detect_all_template_matches):
+    """Return True when the Friends leaderboard (with its mailbox icon) is open."""
+    if screen is None:
+        return False
+    top_matches = detect_func(
+        screen,
+        FRIEND_TOP_LEADERBOARD_TEMPLATE,
+        FRIEND_TOP_LEADERBOARD_REGION,
+    )
+    return bool(top_matches) and any(
+        _friend_match_mean_brightness(screen, match) >= 175.0
+        for match in top_matches
+    )
+
+
+def handle_mailbox_receive_and_send_lives(
+    *,
+    capture_func=None,
+    detect_func=None,
+    tap_func=None,
+    sleep_func=None,
+    max_open_attempts=6,
+    max_total_iterations=200,
+    confirm_poll_attempts=6,
+    progress_poll_attempts=8,
+):
+    """Receive mailbox hearts and send lives back, one green Confirm at a time.
+
+    The caller must already have the Friends leaderboard open so the mailbox
+    icon is visible.  Every loop is bounded and re-verifies each tap so an
+    unexpected screen cannot leave an endless click worker running.
+    """
+    capture_func = capture_func or (
+        lambda: device_capture_screen(DEVICE_IP, DEVICE_PORT)
+    )
+    detect_func = detect_func or detect_all_template_matches
+    tap_func = tap_func or (
+        lambda x, y: device_tap(DEVICE_IP, DEVICE_PORT, x, y)
+    )
+    sleep_func = sleep_func or time.sleep
+
+    def capture_or_raise():
+        current_screen = capture_func()
+        if current_screen is None:
+            raise RuntimeError("Could not capture the LDPlayer screen.")
+        return current_screen
+
+    def matches(current_screen, template_files, region):
+        return list(detect_func(current_screen, template_files, region) or [])
+
+    screen = capture_or_raise()
+    if not _mailbox_entry_visible(screen, detect_func):
+        raise RuntimeError(
+            "Friends leaderboard not detected. Open the Friends leaderboard "
+            "from the main screen, then press Receive Mailbox Hearts again."
+        )
+
+    def leaderboard_returned(current_screen):
+        return _mailbox_entry_visible(current_screen, detect_func)
+
+    def mailbox_marker_visible(current_screen):
+        """Return True when a lives-state marker of the mailbox is visible."""
+        return bool(
+            matches(
+                current_screen,
+                NO_LIVES_TO_RECEIVE_TEMPLATE,
+                NO_LIVES_TO_RECEIVE_REGION,
+            )
+            or matches(
+                current_screen,
+                ALL_LIVES_RECEIVED_AND_SENT_TEMPLATE,
+                ALL_LIVES_RECEIVED_AND_SENT_REGION,
+            )
+            or matches(
+                current_screen,
+                CONFIRM_SEND_LIFE_TEMPLATE,
+                CONFIRM_SEND_LIFE_REGION,
+            )
+        )
+
+    print("📮 Opening the mailbox...")
+    mail_x, mail_y = MAIL_BOX_BUTTON
+    tap_func(mail_x, mail_y)
+    # The mailbox window covers the leaderboard (dimming it) or shows a lives
+    # marker right away.  Tap the icon a few times for slow animations before
+    # giving up, so a one-frame lag never taps the Lives tab on the leaderboard.
+    mailbox_open = False
+    for _ in range(max(0, int(max_open_attempts))):
+        sleep_func(0.4)
+        screen = capture_or_raise()
+        if mailbox_marker_visible(screen) or not leaderboard_returned(screen):
+            mailbox_open = True
+            break
+        tap_func(mail_x, mail_y)
+    if not mailbox_open:
+        raise RuntimeError(
+            "The mailbox window did not open. Stopped safely before tapping "
+            "any tab or Confirm button."
+        )
+
+    # Some builds land on the "Lives" tab directly, others open on Mail. The
+    # Lives tab header is fixed and tapping it again on the correct tab is safe.
+    tab_x, tab_y = MAIL_BOX_LIVES_TAB_BUTTON
+    tap_func(tab_x, tab_y)
+    sleep_func(0.4)
+
+    no_lives_matches = matches(
+        screen,
+        NO_LIVES_TO_RECEIVE_TEMPLATE,
+        NO_LIVES_TO_RECEIVE_REGION,
+    )
+    if not no_lives_matches:
+        for _ in range(max(0, int(progress_poll_attempts))):
+            sleep_func(0.3)
+            screen = capture_or_raise()
+            no_lives_matches = matches(
+                screen,
+                NO_LIVES_TO_RECEIVE_TEMPLATE,
+                NO_LIVES_TO_RECEIVE_REGION,
+            )
+            if no_lives_matches:
+                break
+
+    processed_count = 0
+    if no_lives_matches:
+        print("✉️ No mailbox lives to receive — closing the mailbox.")
+    else:
+        print("✉️ Receiving all mailbox lives...")
+        receive_x, receive_y = QUICK_RECEIVE_AND_SEND_LIVES_BUTTON
+        tap_func(receive_x, receive_y)
+        sleep_func(0.4)
+        total_iterations = 0
+        stalled_frames = 0
+        while total_iterations < max(0, int(max_total_iterations)):
+            total_iterations += 1
+            screen = capture_or_raise()
+
+            all_done = matches(
+                screen,
+                ALL_LIVES_RECEIVED_AND_SENT_TEMPLATE,
+                ALL_LIVES_RECEIVED_AND_SENT_REGION,
+            )
+            if all_done:
+                accept_x, accept_y, accept_width, accept_height = all_done[0]
+                print("✉️ All mailbox lives received and sent. Confirming...")
+                tap_func(
+                    accept_x + accept_width // 2,
+                    accept_y + accept_height // 2,
+                )
+                sleep_func(0.4)
+                break
+
+            confirm_matches = matches(
+                screen,
+                CONFIRM_SEND_LIFE_TEMPLATE,
+                CONFIRM_SEND_LIFE_REGION,
+            )
+            if confirm_matches:
+                confirm_x, confirm_y, confirm_width, confirm_height = sorted(
+                    confirm_matches,
+                    key=lambda match: (match[1], match[0]),
+                )[0]
+                print(f"✉️ Confirming mailbox heart #{processed_count + 1}...")
+                tap_func(
+                    confirm_x + confirm_width // 2,
+                    confirm_y + confirm_height // 2,
+                )
+                # Wait until the green Confirm really clears before counting it.
+                confirmation_cleared = False
+                for _ in range(max(1, int(confirm_poll_attempts))):
+                    sleep_func(0.15)
+                    screen = capture_or_raise()
+                    remaining = matches(
+                        screen,
+                        CONFIRM_SEND_LIFE_TEMPLATE,
+                        CONFIRM_SEND_LIFE_REGION,
+                    )
+                    if not remaining:
+                        confirmation_cleared = True
+                        break
+                if not confirmation_cleared:
+                    try:
+                        save_debug_screen(screen)
+                    except Exception as exc:
+                        print(f"⚠️ Could not save mailbox screenshot: {exc}")
+                    raise RuntimeError(
+                        "The mailbox Confirm did not clear after tapping it. "
+                        f"Stopped safely after {processed_count} mailbox "
+                        "heart(s)."
+                    )
+                processed_count += 1
+                stalled_frames = 0
+                continue
+
+            if matches(
+                screen,
+                NO_LIVES_TO_RECEIVE_TEMPLATE,
+                NO_LIVES_TO_RECEIVE_REGION,
+            ):
+                print("✉️ Mailbox lives ran out — finishing.")
+                break
+
+            stalled_frames += 1
+            if stalled_frames >= max(1, int(progress_poll_attempts)):
+                try:
+                    save_debug_screen(screen)
+                except Exception as exc:
+                    print(f"⚠️ Could not save mailbox screenshot: {exc}")
+                raise RuntimeError(
+                    "The mailbox stopped showing Confirm buttons or a "
+                    "finished message. Stopped safely after "
+                    f"{processed_count} mailbox heart(s)."
+                )
+            sleep_func(0.25)
+        else:
+            try:
+                save_debug_screen(screen)
+            except Exception as exc:
+                print(f"⚠️ Could not save mailbox screenshot: {exc}")
+            raise RuntimeError(
+                "The mailbox receive/send safety limit was reached after "
+                f"{processed_count} mailbox heart(s)."
+            )
+
+    # Close the mailbox and confirm the leaderboard is back.
+    close_x, close_y = MAIL_BOX_CLOSE_BUTTON
+    tap_func(close_x, close_y)
+    for _ in range(max(0, int(max_open_attempts))):
+        sleep_func(0.4)
+        screen = capture_or_raise()
+        if leaderboard_returned(screen):
+            break
+    print(f"✅ Mailbox hearts finished. Processed: {processed_count}")
+    return processed_count
+
+
 def handle_quick_receive_and_send_lives():
-    print("✉️ Handling Quick Receive and Send Lives...")
-    time.sleep(random.uniform(0.8, 1.4))
-    # Tap the "Mail" button
-    safe_device_tap(DEVICE_IP, DEVICE_PORT, MAIL_BOX_BUTTON[0], MAIL_BOX_BUTTON[1])
-    time.sleep(random.uniform(0.8, 1.4))
-    # Tap the "Lives" tab
-    safe_device_tap(DEVICE_IP, DEVICE_PORT, MAIL_BOX_LIVES_TAB_BUTTON[0], MAIL_BOX_LIVES_TAB_BUTTON[1])
+    """Legacy alias kept for launcher compatibility."""
+    return handle_mailbox_receive_and_send_lives()
+
+
+def _popup_still_visible(screen):
+    """Return True while an announcement/event popup covers the screen."""
+    if screen is None:
+        return False
+    return detect_stage(screen, list(POPUP_CLOSE_VERIFY_STAGES)) is not None
+
+
+def close_news_dialog():
+    """Close the "News" announcement popup by tapping its dedicated X button.
+
+    The News banner (e.g. the Mango Sticky Rice update) uses a dark circular
+    X in the teal header corner at (1125, 55), which the generic announcement
+    close coordinates miss.  Returns True when the stage is cleared, False
+    when it could not be dismissed.
+    """
+    print("📰 Closing News popup...")
+    try:
+        screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
+    except Exception:
+        screen = None
+    if detect_stage(screen, ("NEWS",)) != "NEWS":
+        print("📰 News popup not detected — nothing to close.")
+        return True
+    safe_device_tap(
+        DEVICE_IP,
+        DEVICE_PORT,
+        NEWS_CLOSE_BUTTON[0],
+        NEWS_CLOSE_BUTTON[1],
+    )
     time.sleep(random.uniform(0.8, 1.4))
     screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
-    # No lives to receive
-    if detect_templates(screen, NO_LIVES_TO_RECEIVE_TEMPLATE, NO_LIVES_TO_RECEIVE_REGION):
-        print("✉️ No lives to receive. Proceeding to send lives...")
-        # Close the mail dialog
-        safe_device_tap(DEVICE_IP, DEVICE_PORT, MAIL_BOX_CLOSE_BUTTON[0], MAIL_BOX_CLOSE_BUTTON[1])
-        return
-    # Receive all lives
-    print("✉️ Receiving all lives...")
-    safe_device_tap(DEVICE_IP, DEVICE_PORT, QUICK_RECEIVE_AND_SEND_LIVES_BUTTON[0], QUICK_RECEIVE_AND_SEND_LIVES_BUTTON[1])
-    time.sleep(random.uniform(0.8, 1.4))
-    # Tap all send life buttons
-    while True:
-        # Check if all lifes received and sent!, so break the loop
-        screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
-        all_lives_received_and_sent = detect_templates(screen, ALL_LIVES_RECEIVED_AND_SENT_TEMPLATE, ALL_LIVES_RECEIVED_AND_SENT_REGION)
-        if all_lives_received_and_sent:
-            print("✉️ All lives received and sent. Done!")
-            # Tap the "Confirm" button
-            safe_device_tap(DEVICE_IP, DEVICE_PORT, ACCEPT_ALL_LIVES_RECEIVED_AND_SENT_BUTTON[0], ACCEPT_ALL_LIVES_RECEIVED_AND_SENT_BUTTON[1])
-            time.sleep(random.uniform(0.8, 1.4))
-            # Close the mail dialog
-            safe_device_tap(DEVICE_IP, DEVICE_PORT, MAIL_BOX_CLOSE_BUTTON[0], MAIL_BOX_CLOSE_BUTTON[1])
-            time.sleep(random.uniform(0.8, 1.4))
-            break
-        # Send lifes to friends
-        confirm_send_life_button_coords = detect_templates(screen, CONFIRM_SEND_LIFE_TEMPLATE, CONFIRM_SEND_LIFE_REGION)
-        if confirm_send_life_button_coords:
-            print("✉️ Sending lives to friends...")
-            safe_device_tap(DEVICE_IP, DEVICE_PORT, CONFIRM_SEND_LIFE_BUTTON[0], CONFIRM_SEND_LIFE_BUTTON[1])
-            time.sleep(random.uniform(0.8, 1.4))
-    print("✉️ Quick Receive and Send Lives completed.")
+    if detect_stage(screen, ("NEWS",)) != "NEWS":
+        print("✅ News popup closed.")
+        return True
+    # Fall back to the generic announcement sweep if the dedicated point fails.
+    return close_announcement_dialog()
 
 
 def close_announcement_dialog():
+    """Close the event/announcement popup, trying every known X location.
+
+    Different popup widths place the X glyph at different offsets, so the old
+    single fixed coordinate could tap beside the button and leave the modal
+    open forever.  Returns True when the popup is gone, False when it could
+    not be dismissed (the caller should then restart the game).
+    """
     print("🖱️ Closing announcement dialog...")
-    for i in range(5):
-        print(f"🖱️ Tapping close announcement dialog button {i+1}/5")
-        safe_device_tap(DEVICE_IP, DEVICE_PORT, CLOSE_ANNOUNCEMENT_DIALOG_BUTTON[0], CLOSE_ANNOUNCEMENT_DIALOG_BUTTON[1])
+    candidates = list(POPUP_CLOSE_X_CANDIDATES)
+    if CLOSE_ANNOUNCEMENT_DIALOG_BUTTON not in candidates:
+        candidates.append(CLOSE_ANNOUNCEMENT_DIALOG_BUTTON)
+    if NEWS_CLOSE_BUTTON not in candidates:
+        candidates.append(NEWS_CLOSE_BUTTON)
+    for attempt, (x, y) in enumerate(candidates, 1):
+        print(f"🖱️ Trying X close candidate {attempt}/{len(candidates)} at ({x}, {y})")
+        safe_device_tap(DEVICE_IP, DEVICE_PORT, x, y)
         time.sleep(random.uniform(0.8, 1.4))
-        # Verify whether the announcement popup is still visible
-        device_screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
-        if device_screen is not None:
-            still_visible = detect_stage(device_screen, ["ANNOUNCEMENT", "DAILY_NEW"])
-            if still_visible is None:
-                print("✅ Announcement dialog closed successfully.")
-                if detect_stage(device_screen, ["PARTY_RUN"]) == "PARTY_RUN":
-                    close_party_run_mode()
-                return
-    # Fallback: check party run even if we exhausted all taps
-    time.sleep(random.uniform(0.8, 1.4))
-    device_screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
-    if device_screen is not None and detect_stage(device_screen, ["PARTY_RUN"]) == "PARTY_RUN":
-        close_party_run_mode()
+        screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
+        if not _popup_still_visible(screen):
+            print("✅ Announcement dialog closed successfully.")
+            if detect_stage(screen, ["PARTY_RUN"]) == "PARTY_RUN":
+                close_party_run_mode()
+            return True
+    # Fallback: Android BACK often closes a full-screen modal.
+    if _popup_still_visible(device_capture_screen(DEVICE_IP, DEVICE_PORT)):
+        print("↩️ X candidates failed — pressing BACK to dismiss the popup...")
+        device_back(DEVICE_IP, DEVICE_PORT)
+        time.sleep(random.uniform(0.8, 1.4))
+        screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
+        if not _popup_still_visible(screen):
+            print("✅ Announcement dialog closed with BACK.")
+            return True
+        # Persist the unknown popup so a future build can add its template/X.
+        try:
+            save_debug_screen(screen)
+        except Exception as exc:
+            print(f"⚠️ Could not save popup screenshot: {exc}")
+        print("❌ Announcement dialog could not be closed.")
+        return False
+    return True
 
 
 def close_party_run_mode():
     print("🖱️ Closing Party Run mode...")
     safe_device_tap(DEVICE_IP, DEVICE_PORT, EXIT_PARTY_RUN_MODE_BUTTON[0], EXIT_PARTY_RUN_MODE_BUTTON[1])
     time.sleep(random.uniform(0.8, 1.4))
+
+
+def _region_mean_brightness(screen, region):
+    """Return the mean HSV value (brightness) of an (x1, y1, x2, y2) region."""
+    if screen is None or not hasattr(screen, "shape"):
+        return 0.0
+    x1, y1, x2, y2 = region
+    screen_height, screen_width = screen.shape[:2]
+    x1, y1 = max(0, x1), max(0, y1)
+    x2, y2 = min(screen_width, x2), min(screen_height, y2)
+    if x2 <= x1 or y2 <= y1:
+        return 0.0
+    roi = screen[y1:y2, x1:x2]
+    if roi.size == 0:
+        return 0.0
+    return float(cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)[:, :, 2].mean())
+
+
+def main_menu_start_area_clear(screen):
+    """Return True when the START/Play button area is bright and unobstructed.
+
+    A modal popup dims everything behind it, so this bottom-right region being
+    dark means an overlay is still covering the menu.  Templates cannot catch
+    every new event popup, so brightness is used as the generic signal.
+    """
+    return _region_mean_brightness(screen, MAIN_MENU_START_REGION) >= MAIN_MENU_START_MIN_BRIGHTNESS
+
+
+def dismiss_overlay_over_main_menu():
+    """Try to close an unrecognised popup covering the main-menu START button.
+
+    Sweeps the known X positions and finishes with BACK, re-checking after each
+    tap whether the bright START area is visible again.  Returns True when the
+    menu cleared, False when the overlay survived every attempt (the bot should
+    then restart the game).  Saves a debug screenshot on failure.
+    """
+    print("🖱️ Dismissing overlay over the main menu...")
+    screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
+    if screen is not None and main_menu_start_area_clear(screen):
+        print("✅ Main menu START area is already clear.")
+        return True
+    candidates = list(POPUP_CLOSE_X_CANDIDATES)
+    if CLOSE_ANNOUNCEMENT_DIALOG_BUTTON not in candidates:
+        candidates.append(CLOSE_ANNOUNCEMENT_DIALOG_BUTTON)
+    if NEWS_CLOSE_BUTTON not in candidates:
+        candidates.append(NEWS_CLOSE_BUTTON)
+    for attempt, (x, y) in enumerate(candidates, 1):
+        safe_device_tap(DEVICE_IP, DEVICE_PORT, x, y)
+        time.sleep(random.uniform(0.8, 1.4))
+        screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
+        if screen is None:
+            continue
+        if main_menu_start_area_clear(screen):
+            print(f"✅ Overlay dismissed with X candidate {attempt} ({x}, {y}).")
+            return True
+    print("↩️ X candidates failed — pressing BACK to clear the main menu...")
+    device_back(DEVICE_IP, DEVICE_PORT)
+    time.sleep(random.uniform(0.8, 1.4))
+    screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
+    if screen is not None and main_menu_start_area_clear(screen):
+        print("✅ Overlay dismissed with BACK.")
+        return True
+    try:
+        if screen is not None:
+            save_debug_screen(screen)
+    except Exception as exc:
+        print(f"⚠️ Could not save overlay screenshot: {exc}")
+    print("❌ Overlay over the main menu could not be dismissed.")
+    return False

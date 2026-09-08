@@ -1,5 +1,5 @@
 #define MyAppName "CookieRun Classic Bot"
-#define MyAppVersion "1.4.10"
+#define MyAppVersion "1.4.11"
 #define MyAppPublisher "CookieBot"
 #define MyAppExeName "CookieRunClassicBot.exe"
 

@@ -17,11 +17,13 @@ from actions import (
     accept_relic_claim,
     accept_too_many_treasures,
     close_announcement_dialog,
+    close_news_dialog,
     close_party_run_mode,
     close_relic_claim_without_reward,
     complete_finish,
     handle_anti_bot,
     handle_inactive,
+    handle_mailbox_receive_and_send_lives,
     handle_send_friend_life,
     open_relic_complete,
     play_game,
@@ -56,6 +58,8 @@ from config import (
     FRIEND_SEND_LIFE_TEMPLATE,
     FRIEND_TOP_LEADERBOARD_REGION,
     FRIEND_TOP_LEADERBOARD_TEMPLATE,
+    ANNOUNCEMENT_MAX_FAILURES,
+    MAIN_MENU_START_STALL_LIMIT,
     NEXT_GAME_DELAY,
     RESULT_REWARD_MIN_WAIT,
     RESULT_REWARD_POLL_INTERVAL,
@@ -63,6 +67,7 @@ from config import (
     RESULT_REWARD_TIMEOUT,
     SESSION_RESET_INTERVAL,
     STAGE_TEMPLATES,
+    UNKNOWN_SCREEN_RESET_THRESHOLD,
 )
 from detection import detect_all_template_matches, detect_stage, load_templates
 from debug import save_debug_screen
@@ -406,6 +411,36 @@ def send_friend_hearts(device_ip=None, device_port=None):
     return sent_count
 
 
+def receive_and_send_mailbox_hearts(device_ip=None, device_port=None):
+    """Run the one-shot mailbox receive/send action from the Friends screen."""
+    configure_device(
+        DEVICE_IP if device_ip is None else device_ip,
+        DEVICE_PORT if device_port is None else device_port,
+    )
+    print(f"📱 Connecting to device at {DEVICE_IP}:{DEVICE_PORT}...")
+    device_connect(DEVICE_IP, DEVICE_PORT)
+    initial_screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
+    if initial_screen is None:
+        raise RuntimeError("Connected, but the device screenshot could not be decoded.")
+    screen_height, screen_width = initial_screen.shape[:2]
+    if (screen_width, screen_height) != (1280, 720):
+        raise RuntimeError(
+            f"Unsupported screen resolution {screen_width}x{screen_height}; "
+            "this version requires LDPlayer 1280x720."
+        )
+    load_templates()
+    if detect_stage(initial_screen, ("MAINMENU",)) != "MAINMENU":
+        raise RuntimeError(
+            "Main/Friends leaderboard not detected. Open the Friends "
+            "leaderboard from the main screen before pressing Receive "
+            "Mailbox Hearts."
+        )
+    processed_count = handle_mailbox_receive_and_send_lives()
+    print(f"✅ รับ/ส่งหัวใจจากกล่องจดหมายแล้วทั้งหมด {processed_count} รายการ")
+    print(f"[MAILBOX_HEARTS] processed={processed_count}")
+    return processed_count
+
+
 def _reset_app_or_raise(failure_reason):
     """Restart the game or fail the worker so the GUI reports an error."""
     if device_reset_app(DEVICE_IP, DEVICE_PORT):
@@ -564,6 +599,11 @@ def main(options=None, device_ip=None, device_port=None):
         detection_group = "PRE_GAME"
         last_detected_time = time.time()
         stuck_scan_count = 0
+        unknown_back_count = 0
+        announcement_failure_count = 0
+        _announcement_debug_saved = False
+        main_menu_start_pending = False
+        main_menu_start_failures = 0
         session_start_time = time.time()
         session_reset_interval = random.uniform(*SESSION_RESET_INTERVAL)
         run_in_progress = False
@@ -607,6 +647,8 @@ def main(options=None, device_ip=None, device_port=None):
                 relay_quick_exit_rewards = {"coins": 0, "exp": 0}
                 last_stage = None
                 is_first_game = True
+                main_menu_start_pending = False
+                main_menu_start_failures = 0
                 continue
             stage = detect_stage(
                 device_screen,
@@ -630,18 +672,58 @@ def main(options=None, device_ip=None, device_port=None):
                         stuck_scan_count = 0
                     if stuck_scan_count >= 2:
                         # Stuck on a screen the bot does not recognise (mail,
-                        # cookie baking, etc.). One BACK press returns to the
-                        # main menu so the loop can recover on its own.
+                        # cookie baking, unknown event popup, etc.). One BACK
+                        # press returns to the main menu so the loop can
+                        # recover on its own.
                         print(
                             "↩️ No known screen after repeated recovery scans — "
                             "pressing BACK to return to the main menu..."
                         )
+                        try:
+                            save_debug_screen(device_screen)
+                        except Exception as debug_err:
+                            print(f"⚠️ Could not save debug screen: {debug_err}")
                         device_back(DEVICE_IP, DEVICE_PORT)
                         time.sleep(1.0)
                         stuck_scan_count = 0
+                        unknown_back_count += 1
+                        print(
+                            f"↩️ Unknown-screen BACK recovery "
+                            f"{unknown_back_count}/{UNKNOWN_SCREEN_RESET_THRESHOLD}"
+                        )
+                        if unknown_back_count >= UNKNOWN_SCREEN_RESET_THRESHOLD:
+                            # A modal the BACK key cannot dismiss (event popup
+                            # etc.) is cleared by restarting the game.
+                            unknown_back_count = 0
+                            _reset_app_or_raise(
+                                "Unknown screens keep blocking the bot "
+                                "after repeated BACK presses."
+                            )
+                            close_announcement_dialog()
+                            session_start_time = time.time()
+                            session_reset_interval = random.uniform(*SESSION_RESET_INTERVAL)
+                            detection_group = "PRE_GAME"
+                            run_in_progress = False
+                            run_durations.cancel()
+                            box_stats.cancel_run()
+                            relay_quick_exit_pending = False
+                            relay_quick_exit_rewards = {"coins": 0, "exp": 0}
+                            last_stage = None
+                            is_first_game = True
+                            main_menu_start_pending = False
+                            main_menu_start_failures = 0
+                            continue
             else:
                 last_detected_time = time.time()
                 stuck_scan_count = 0
+                unknown_back_count = 0
+                if stage != "ANNOUNCEMENT":
+                    announcement_failure_count = 0
+                    _announcement_debug_saved = False
+                if stage != "MAINMENU":
+                    # The START tap worked and the loop moved to another stage.
+                    main_menu_start_pending = False
+                    main_menu_start_failures = 0
 
             if stage == last_stage:
                 time.sleep(0.1)
@@ -651,6 +733,44 @@ def main(options=None, device_ip=None, device_port=None):
 
             if stage == "MAINMENU":
                 print("🎮 Detected Stage: MAINMENU")
+                # A run start normally advances to PURCHASE_ITEM/GAME_START on
+                # the next capture.  When START was just pressed here and the
+                # loop is still on MAINMENU, an event/announcement popup that
+                # shares the top-left header swallowed the tap.  The stall
+                # counter only grows on consecutive MAINMENU reads after a
+                # start attempt, so a normal slow transition is tolerated.
+                if main_menu_start_pending:
+                    main_menu_start_failures += 1
+                    print(
+                        f"🎮 START did not leave MAINMENU "
+                        f"({main_menu_start_failures}/"
+                        f"{MAIN_MENU_START_STALL_LIMIT})"
+                    )
+                else:
+                    main_menu_start_failures = 0
+                main_menu_start_pending = False
+                if main_menu_start_failures >= MAIN_MENU_START_STALL_LIMIT:
+                    main_menu_start_failures = 0
+                    if actions_module.dismiss_overlay_over_main_menu():
+                        last_stage = None
+                        continue
+                    _reset_app_or_raise(
+                        "An overlay keeps covering the main menu START button."
+                    )
+                    close_announcement_dialog()
+                    session_start_time = time.time()
+                    session_reset_interval = random.uniform(*SESSION_RESET_INTERVAL)
+                    detection_group = "PRE_GAME"
+                    run_in_progress = False
+                    run_durations.cancel()
+                    box_stats.cancel_run()
+                    relay_quick_exit_pending = False
+                    relay_quick_exit_rewards = {"coins": 0, "exp": 0}
+                    last_stage = None
+                    is_first_game = True
+                    main_menu_start_pending = False
+                    main_menu_start_failures = 0
+                    continue
                 quick_exit_return = relay_quick_exit_pending
                 if quick_exit_return:
                     # Normally the timer stops on GAME_COMPLETE. Some quick-exit
@@ -728,6 +848,8 @@ def main(options=None, device_ip=None, device_port=None):
                     relay_quick_exit_rewards = {"coins": 0, "exp": 0}
                     last_stage = None
                     is_first_game = True
+                    main_menu_start_pending = False
+                    main_menu_start_failures = 0
                     continue
                 if detection_group == "POST_GAME":
                     detection_group = "PRE_GAME"
@@ -745,6 +867,7 @@ def main(options=None, device_ip=None, device_port=None):
                 retry_interrupted_run = False
                 is_first_game = False
                 start_game()
+                main_menu_start_pending = True
                 detection_group = "PRE_GAME"
                 last_stage = None
             elif stage == "PURCHASE_ITEM":
@@ -989,9 +1112,80 @@ def main(options=None, device_ip=None, device_port=None):
                 close_party_run_mode()
                 detection_group = "PRE_GAME"
                 last_stage = None
+            elif stage == "NEWS":
+                print("📰 Detected Stage: NEWS")
+                closed = close_news_dialog()
+                if not closed:
+                    announcement_failure_count += 1
+                    print(
+                        f"📰 News popup could not be closed "
+                        f"({announcement_failure_count}/"
+                        f"{ANNOUNCEMENT_MAX_FAILURES})"
+                    )
+                else:
+                    announcement_failure_count = 0
+                if announcement_failure_count >= ANNOUNCEMENT_MAX_FAILURES:
+                    announcement_failure_count = 0
+                    _reset_app_or_raise(
+                        "The News popup could not be dismissed."
+                    )
+                    close_announcement_dialog()
+                    session_start_time = time.time()
+                    session_reset_interval = random.uniform(*SESSION_RESET_INTERVAL)
+                    detection_group = "PRE_GAME"
+                    run_in_progress = False
+                    run_durations.cancel()
+                    box_stats.cancel_run()
+                    relay_quick_exit_pending = False
+                    relay_quick_exit_rewards = {"coins": 0, "exp": 0}
+                    last_stage = None
+                    is_first_game = True
+                    main_menu_start_pending = False
+                    main_menu_start_failures = 0
+                    continue
+                detection_group = "PRE_GAME"
+                last_stage = None
             elif stage == "ANNOUNCEMENT":
                 print("📢 Detected Stage: ANNOUNCEMENT")
-                close_announcement_dialog()
+                closed = close_announcement_dialog()
+                if not closed:
+                    announcement_failure_count += 1
+                    print(
+                        f"📢 Announcement popup could not be closed "
+                        f"({announcement_failure_count}/"
+                        f"{ANNOUNCEMENT_MAX_FAILURES})"
+                    )
+                    if not _announcement_debug_saved:
+                        try:
+                            save_debug_screen(device_screen)
+                            _announcement_debug_saved = True
+                        except Exception as debug_err:
+                            print(f"⚠️ Could not save debug screen: {debug_err}")
+                else:
+                    announcement_failure_count = 0
+                    _announcement_debug_saved = False
+                if announcement_failure_count >= ANNOUNCEMENT_MAX_FAILURES:
+                    announcement_failure_count = 0
+                    _announcement_debug_saved = False
+                    # A popup the X/BACK keys cannot dismiss is cleared by a
+                    # restart; otherwise the bot would tap forever in place.
+                    _reset_app_or_raise(
+                        "The announcement/event popup could not be dismissed."
+                    )
+                    close_announcement_dialog()
+                    session_start_time = time.time()
+                    session_reset_interval = random.uniform(*SESSION_RESET_INTERVAL)
+                    detection_group = "PRE_GAME"
+                    run_in_progress = False
+                    run_durations.cancel()
+                    box_stats.cancel_run()
+                    relay_quick_exit_pending = False
+                    relay_quick_exit_rewards = {"coins": 0, "exp": 0}
+                    last_stage = None
+                    is_first_game = True
+                    main_menu_start_pending = False
+                    main_menu_start_failures = 0
+                    continue
                 detection_group = "PRE_GAME"
                 last_stage = None
             elif stage == "ANTI_BOT":
@@ -1012,6 +1206,8 @@ def main(options=None, device_ip=None, device_port=None):
                 relay_quick_exit_rewards = {"coins": 0, "exp": 0}
                 last_stage = None
                 is_first_game = True
+                main_menu_start_pending = False
+                main_menu_start_failures = 0
             elif stage == "INACTIVE":
                 print("💤 Detected Stage: INACTIVE")
                 handle_inactive()

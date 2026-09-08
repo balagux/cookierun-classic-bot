@@ -373,7 +373,20 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             font=self._font(11, "bold"),
             command=self._send_hearts,
         )
-        self.send_hearts_button.pack(fill="x", padx=12, pady=(0, 12))
+        self.send_hearts_button.pack(fill="x", padx=12, pady=(0, 7))
+        self.mailbox_hearts_button = ctk.CTkButton(
+            run_panel,
+            height=39,
+            corner_radius=11,
+            text="รับหัวใจจากกล่องจดหมาย",
+            image=self.icons["heart"],
+            fg_color="#3D6EA5",
+            hover_color="#4A7FBB",
+            text_color="#FFFFFF",
+            font=self._font(11, "bold"),
+            command=self._send_mailbox_hearts,
+        )
+        self.mailbox_hearts_button.pack(fill="x", padx=12, pady=(0, 12))
         repeat = ctk.CTkFrame(run_panel, fg_color="transparent")
         repeat.pack(fill="x", padx=13)
         ctk.CTkLabel(repeat, text="จำนวนรอบ", text_color="#C1C4D3", font=self._font(10)).pack(side="left")
