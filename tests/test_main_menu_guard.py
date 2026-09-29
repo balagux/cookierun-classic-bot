@@ -19,24 +19,28 @@ def _options():
     }
 
 
-class FriendsLeaderboardDetectorTests(unittest.TestCase):
-    def test_detects_leaderboard_when_templates_match(self):
-        screen = np.zeros((720, 1280, 3), dtype=np.uint8)
-        with mock.patch.object(
-            bot, "detect_all_template_matches", return_value=[(1, 2, 3, 4)]
-        ):
-            self.assertTrue(bot._is_friends_leaderboard_open(screen))
-
-    def test_returns_false_when_no_templates_match(self):
-        screen = np.zeros((720, 1280, 3), dtype=np.uint8)
-        with mock.patch.object(bot, "detect_all_template_matches", return_value=[]):
-            self.assertFalse(bot._is_friends_leaderboard_open(screen))
-
-    def test_returns_false_for_none_screen(self):
-        self.assertFalse(bot._is_friends_leaderboard_open(None))
-
 
 class MainMenuGuardTests(unittest.TestCase):
+    def test_normal_main_menu_with_friends_panel_starts_without_back(self):
+        screen = np.zeros((720, 1280, 3), dtype=np.uint8)
+        with (
+            mock.patch.object(bot, "device_connect"),
+            mock.patch.object(bot, "device_capture_screen", return_value=screen),
+            mock.patch.object(bot, "load_templates"),
+            mock.patch.object(bot, "detect_stage", side_effect=["MAINMENU", KeyboardInterrupt()]),
+            mock.patch.object(
+                bot, "detect_all_template_matches", return_value=[(1, 2, 3, 4)]
+            ),
+            mock.patch.object(bot, "device_back") as back,
+            mock.patch.object(bot, "start_game") as start,
+            mock.patch.object(bot.time, "sleep"),
+            mock.patch("sys.stdout", io.StringIO()),
+        ):
+            bot.main(_options())
+
+        back.assert_not_called()
+        start.assert_called_once()
+
     def test_starts_immediately_when_main_menu_is_detected(self):
         screen = np.zeros((720, 1280, 3), dtype=np.uint8)
         output = io.StringIO()
@@ -67,7 +71,6 @@ class MainMenuGuardTests(unittest.TestCase):
             mock.patch.object(bot, "load_templates"),
             mock.patch.object(bot, "detect_all_template_matches", return_value=[]),
             mock.patch.object(bot, "detect_stage", side_effect=["MAINMENU", KeyboardInterrupt()]),
-            mock.patch.object(bot, "_is_friends_leaderboard_open", return_value=False),
             mock.patch.object(bot, "device_back") as back,
             mock.patch.object(bot, "start_game") as start,
             mock.patch.object(bot.time, "sleep"),

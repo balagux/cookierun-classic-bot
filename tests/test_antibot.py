@@ -1,9 +1,12 @@
 import unittest
+from pathlib import Path
 from unittest import mock
 
+import cv2
 import numpy as np
 
 import actions
+import bot
 from config import (
     ANTI_BOT_CARD_HEIGHT,
     ANTI_BOT_CARD_POS_1,
@@ -62,6 +65,19 @@ class AntiBotTests(unittest.TestCase):
 
         self.assertTrue(_is_anti_bot_screen(screen))
         self.assertEqual(detect_stage(screen, ("ANTI_BOT",)), "ANTI_BOT")
+
+    def test_daily_checkin_fixture_is_not_misclassified_as_anti_bot(self):
+        fixture = Path(__file__).resolve().parent / "fixtures" / "daily_checkin_antibot_false_positive.png"
+        screen = cv2.imread(str(fixture))
+        self.assertIsNotNone(screen)
+        self.assertEqual(detect_stage(screen, ("DAILY_CHECKIN",)), "DAILY_CHECKIN")
+        self.assertIsNone(detect_stage(screen, ("ANTI_BOT",)))
+        self.assertFalse(_is_anti_bot_screen(screen))
+
+    def test_bot_stops_after_bounded_anti_bot_handler_failure(self):
+        with mock.patch.object(bot, "handle_anti_bot", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "manual intervention"):
+                bot._handle_anti_bot_or_raise(object())
 
     def test_handler_recaptures_after_each_tap_and_stops_when_page_closes(self):
         with (

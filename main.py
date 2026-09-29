@@ -49,6 +49,7 @@ def build_parser():
     mode.add_argument("--send-hearts", action="store_true", help=argparse.SUPPRESS)
     mode.add_argument("--mailbox-hearts", action="store_true", help=argparse.SUPPRESS)
     mode.add_argument("--check-connection", action="store_true", help=argparse.SUPPRESS)
+    mode.add_argument("--check-ready", action="store_true", help=argparse.SUPPRESS)
     mode.add_argument("--check-ocr-runtime", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--device-ip", default=DEVICE_IP)
     parser.add_argument("--device-port", type=int, default=DEVICE_PORT)
@@ -92,10 +93,29 @@ def _check_connection(ip, port):
             f"Unsupported screen resolution {width}x{height}. "
             "Please change LDPlayer to 1280x720 before starting the bot."
         )
+    return screen
+
+
+def _check_ready(ip, port):
+    from detection import detect_stage, load_templates
+
+    screen = _check_connection(ip, port)
+    load_templates()
+    if detect_stage(screen, ("MAINMENU",)) != "MAINMENU":
+        raise RuntimeError("Main Menu not detected. Return to the game main screen before START BOT.")
+    print("✅ Main Menu ready — bot can start.")
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+
+    if args.check_ready:
+        try:
+            _check_ready(args.device_ip, args.device_port)
+            return 0
+        except Exception as exc:
+            print(f"❌ Start check failed: {exc}")
+            return 1
 
     if args.check_connection:
         try:

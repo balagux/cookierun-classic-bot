@@ -182,6 +182,18 @@ def _is_anti_bot_screen(screen):
     if screen_bgr is None or screen_bgr.shape[0] < 700 or screen_bgr.shape[1] < 1172:
         return False
 
+    # Several normal reward dialogs use the same cyan header and pale grid
+    # geometry as the Anti-Bot screen.  Prefer their specific templates over
+    # the broad Anti-Bot layout heuristic so a Daily Check-in cannot be
+    # mistaken for six captcha cards and clicked indefinitely.
+    for normal_stage in ("DAILY_CHECKIN", "DAILY_CHECKIN_BOOST_SET", "DAILY_TREASURE"):
+        if detect_templates(
+            screen_bgr,
+            STAGE_TEMPLATES.get(normal_stage, ()),
+            STAGE_REGIONS.get(normal_stage),
+        ):
+            return False
+
     hsv = cv2.cvtColor(screen_bgr, cv2.COLOR_BGR2HSV)
     header = hsv[10:112, 108:1172]
     cyan = cv2.inRange(header, (80, 80, 80), (105, 255, 255))

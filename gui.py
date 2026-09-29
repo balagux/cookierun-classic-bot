@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 import queue
 import re
@@ -34,6 +34,11 @@ class CookieRunBotGUI:
         self.stop_requested = False
         self.events = queue.Queue()
         self.connection_test_running = False
+        self._pending_start_command = None
+        self._controls_locked = False
+        self._game_stage_text = "ยังไม่เริ่ม"
+        self._game_stage_at = None
+        self._game_stage_elapsed_second = None
         self._session_started_at = None
         self._session_last_elapsed_second = None
         self._heart_sent_count = None
@@ -47,6 +52,7 @@ class CookieRunBotGUI:
         self.claim_relic_rewards_var = tk.BooleanVar(value=True)
         self.max_runs_var = tk.StringVar(value="0")
         self.status_var = tk.StringVar(value="พร้อมใช้งาน")
+        self.game_stage_var = tk.StringVar(value="สถานะเกม: ยังไม่เริ่ม")
         self.session_stats_var = tk.StringVar(
             value="รอบ 0/0 • Coins 0 (เฉลี่ย 0) • EXP 0 (เฉลี่ย 0)"
         )
@@ -269,7 +275,7 @@ class CookieRunBotGUI:
         ).pack(anchor="w")
         tk.Label(
             brand_copy,
-            text="CLASSIC  •  v1.4.14",
+            text="CLASSIC  •  v1.4.15",
             bg="#171a2e",
             fg="#797e9b",
             font=("Segoe UI Semibold", 8),
@@ -357,7 +363,7 @@ class CookieRunBotGUI:
         ).pack(anchor="w")
         tk.Label(
             title_block,
-            text="ตั้งค่าการซื้อไอเทม แล้วเริ่มบอทได้ทันที",
+            textvariable=self.game_stage_var,
             bg="#ffffff",
             fg="#8a8fa2",
             font=("Segoe UI", 9),
@@ -422,14 +428,17 @@ class CookieRunBotGUI:
         option_fields = tk.Frame(options, bg="#ffffff")
         option_fields.pack(fill="x", padx=14, pady=(0, 11))
         option_fields.columnconfigure(3, weight=1)
-        ttk.Checkbutton(option_fields, text="⚡  Fast Start", variable=self.fast_start_var).grid(row=0, column=0, sticky="w", padx=(0, 16))
-        ttk.Checkbutton(option_fields, text="Cookie Relay (ซื้อเมื่อหมด)", variable=self.cookie_relay_var).grid(row=0, column=1, sticky="w", padx=(0, 16))
-        ttk.Checkbutton(
+        self.fast_start_switch = ttk.Checkbutton(option_fields, text="⚡  Fast Start", variable=self.fast_start_var)
+        self.fast_start_switch.grid(row=0, column=0, sticky="w", padx=(0, 16))
+        self.cookie_relay_switch = ttk.Checkbutton(option_fields, text="Cookie Relay (ซื้อเมื่อหมด)", variable=self.cookie_relay_var)
+        self.cookie_relay_switch.grid(row=0, column=1, sticky="w", padx=(0, 16))
+        self.random_boost_switch = ttk.Checkbutton(
             option_fields,
             text="Random Boost",
             variable=self.use_boost_var,
             command=self._toggle_boost,
-        ).grid(row=0, column=2, sticky="w", padx=(0, 9))
+        )
+        self.random_boost_switch.grid(row=0, column=2, sticky="w", padx=(0, 9))
         self.boost_combo = ttk.Combobox(
             option_fields,
             values=[name for name, _ in BOOST_CHOICES],
@@ -438,16 +447,18 @@ class CookieRunBotGUI:
         )
         self.boost_combo.grid(row=0, column=3, sticky="ew")
         self.boost_combo.current(0)
-        ttk.Checkbutton(
+        self.relay_quick_exit_switch = ttk.Checkbutton(
             option_fields,
             text="ออกเร็วหลังไม้ 2 (ปิด = รอจนตาย)",
             variable=self.relay_quick_exit_var,
-        ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(7, 0))
-        ttk.Checkbutton(
+        )
+        self.relay_quick_exit_switch.grid(row=1, column=0, columnspan=4, sticky="w", pady=(7, 0))
+        self.relic_reward_switch = ttk.Checkbutton(
             option_fields,
             text="รับรางวัล Relic อัตโนมัติ (ปิดเพื่อดองชิ้นส่วน)",
             variable=self.claim_relic_rewards_var,
-        ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(7, 0))
+        )
+        self.relic_reward_switch.grid(row=2, column=0, columnspan=4, sticky="w", pady=(7, 0))
 
         statistics = make_card(2)
         statistics_header = add_header(
@@ -568,7 +579,7 @@ class CookieRunBotGUI:
         return Path(tempfile.gettempdir()) / filename
 
     def _start_bot(self):
-        if self.process is not None and self.process.poll() is None:
+        if self.connection_test_running or (self.process is not None and self.process.poll() is None):
             return
         try:
             command = self._base_command("--run-bot")
@@ -585,7 +596,21 @@ class CookieRunBotGUI:
             messagebox.showerror("จำนวนรอบไม่ถูกต้อง", "จำนวนรอบต้องเป็นเลข 0 ขึ้นไป", parent=self.root)
             return
         command.extend(["--max-runs", str(max_runs)])
-        self._launch_process(command, "bot")
+        self._begin_start_preflight(command)
+
+    def _begin_start_preflight(self, command):
+        check_command = self._base_command("--check-ready")
+        self._pending_start_command = command
+        self.connection_test_running = True
+        self._set_preflight_controls(True)
+        self._set_status("กำลังตรวจความพร้อม...", "testing")
+        self._set_game_stage("กำลังตรวจ ADB และหน้าเกม")
+        self._append_log("\nตรวจความพร้อมก่อนเริ่มบอท...\n")
+        threading.Thread(
+            target=self._run_connection_test,
+            args=(check_command, "start_preflight_result"),
+            daemon=True,
+        ).start()
 
     def _send_hearts(self):
         """Run the friend-heart sender as a separate, stoppable worker."""
@@ -750,6 +775,28 @@ class CookieRunBotGUI:
         threading.Thread(target=self._terminate_process, args=(process,), daemon=True).start()
 
     def _terminate_process(self, process):
+        # PyInstaller one-file workers have a bootloader parent plus a Python
+        # child. Terminating only the Popen PID leaves the child running in the
+        # background, so Windows STOP must kill the complete worker tree.
+        if os.name == "nt":
+            try:
+                result = subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    timeout=8,
+                    check=False,
+                )
+                if result.returncode == 0:
+                    try:
+                        process.wait(timeout=2)
+                    except (subprocess.TimeoutExpired, OSError):
+                        pass
+                    return
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+
         try:
             process.terminate()
             process.wait(timeout=5)
@@ -778,7 +825,7 @@ class CookieRunBotGUI:
         self._append_log("\nกำลังทดสอบการเชื่อมต่อ ADB...\n")
         threading.Thread(target=self._run_connection_test, args=(command,), daemon=True).start()
 
-    def _run_connection_test(self, command):
+    def _run_connection_test(self, command, event_name="connection_result"):
         creation_flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
@@ -810,21 +857,21 @@ class CookieRunBotGUI:
                         pass
             else:
                 output = result.stdout
-            self.events.put(("connection_result", (result.returncode, output)))
+            self.events.put((event_name, (result.returncode, output)))
         except subprocess.TimeoutExpired:
             if worker_log is not None:
                 try:
                     worker_log.unlink(missing_ok=True)
                 except OSError:
                     pass
-            self.events.put(("connection_result", (1, "หมดเวลารอการเชื่อมต่อ (30 วินาที)\n")))
+            self.events.put((event_name, (1, "หมดเวลารอการเชื่อมต่อ (30 วินาที)\n")))
         except OSError as exc:
             if worker_log is not None:
                 try:
                     worker_log.unlink(missing_ok=True)
                 except OSError:
                     pass
-            self.events.put(("connection_result", (1, f"เรียกโปรแกรมทดสอบไม่ได้: {exc}\n")))
+            self.events.put((event_name, (1, f"เรียกโปรแกรมทดสอบไม่ได้: {exc}\n")))
 
     def _poll_events(self):
         try:
@@ -833,6 +880,7 @@ class CookieRunBotGUI:
                 if event == "log":
                     self._append_log(payload)
                     if self.process_mode == "bot":
+                        self._update_game_stage_from_log(payload)
                         self._update_session_stats(payload)
                         self._update_box_stats(payload)
                     elif self._is_hearts_mode(self.process_mode):
@@ -855,6 +903,8 @@ class CookieRunBotGUI:
                         if self.stop_requested:
                             status = f"หยุด{self._hearts_activity(finished_mode)}แล้ว" if hearts_mode else "หยุดแล้ว"
                             self._set_status(status, "idle")
+                            if finished_mode == "bot":
+                                self._set_game_stage("หยุดโดยผู้ใช้")
                             duration_note = f" • ใช้เวลา {elapsed_text}" if elapsed_text else ""
                             activity = f"หยุด{self._hearts_activity(finished_mode)}แล้ว" if hearts_mode else "บอทหยุดทำงานแล้ว"
                             self._append_log(f"──────── {activity}{duration_note} ────────\n")
@@ -864,17 +914,34 @@ class CookieRunBotGUI:
                             else:
                                 status = self._hearts_status(finished_mode) if hearts_mode else "หยุดแล้ว"
                             self._set_status(status, "success" if hearts_mode else "idle")
+                            if finished_mode == "bot":
+                                self._set_game_stage("จบตามจำนวนรอบ")
                             duration_note = f" • ใช้เวลา {elapsed_text}" if elapsed_text else ""
                             activity = f"{self._hearts_activity(finished_mode)}เสร็จแล้ว" if hearts_mode else "บอทหยุดทำงานแล้ว"
                             self._append_log(f"──────── {activity}{duration_note} ────────\n")
                         else:
                             status = "ส่งหัวใจไม่สำเร็จ" if finished_mode == "hearts" else ("รับหัวใจไม่สำเร็จ" if finished_mode == "mailbox" else "บอทหยุดด้วยข้อผิดพลาด")
                             self._set_status(status, "error")
+                            if finished_mode == "bot":
+                                self._set_game_stage("หยุดด้วยข้อผิดพลาด — ดู Live Activity")
                             duration_note = f" • ใช้เวลา {elapsed_text}" if elapsed_text else ""
                             self._append_log(
                                 f"──────── กระบวนการจบ (รหัส {return_code}){duration_note} ────────\n"
                             )
                         self.stop_requested = False
+                elif event == "start_preflight_result":
+                    return_code, output = payload
+                    self.connection_test_running = False
+                    command = self._pending_start_command
+                    self._pending_start_command = None
+                    self._set_running_controls(False)
+                    self._append_log(output or "ไม่พบผลการตรวจความพร้อม\n")
+                    if return_code == 0 and command is not None:
+                        self._set_game_stage("กำลังเริ่มบอท")
+                        self._launch_process(command, "bot")
+                    else:
+                        self._set_status("ยังไม่พร้อมเริ่ม", "error")
+                        self._set_game_stage(self._preflight_failure_message(output))
                 elif event == "connection_result":
                     return_code, output = payload
                     self.connection_test_running = False
@@ -906,6 +973,8 @@ class CookieRunBotGUI:
             pass
         if self.process_mode == "bot":
             self._update_session_elapsed()
+        if self.process_mode == "bot" or getattr(self, "_pending_start_command", None) is not None:
+            self._update_game_stage_elapsed()
         self.root.after(100, self._poll_events)
 
     def _set_running_controls(self, running):
@@ -920,6 +989,86 @@ class CookieRunBotGUI:
         self.ip_entry.configure(state=state)
         self.port_entry.configure(state=state)
         self.max_runs_spinbox.configure(state=state)
+        self._set_play_option_controls(running)
+
+    def _set_preflight_controls(self, checking):
+        state = "disabled" if checking else "normal"
+        self.start_button.configure(state=state)
+        self.send_hearts_button.configure(state=state)
+        self.test_button.configure(state=state)
+        self.stop_button.configure(state="disabled")
+        self.ip_entry.configure(state=state)
+        self.port_entry.configure(state=state)
+        self.max_runs_spinbox.configure(state=state)
+        self._set_play_option_controls(checking)
+
+    def _set_play_option_controls(self, locked):
+        self._controls_locked = locked
+        state = "disabled" if locked else "normal"
+        for control in (
+            self.fast_start_switch,
+            self.cookie_relay_switch,
+            self.relay_quick_exit_switch,
+            self.random_boost_switch,
+            self.relic_reward_switch,
+        ):
+            control.configure(state=state)
+        self._toggle_boost()
+
+    @staticmethod
+    def _preflight_failure_message(output):
+        message = (output or "").lower()
+        if "screen resolution" in message:
+            return "ความละเอียดเกมต้องเป็น 1280×720"
+        if "main menu" in message:
+            return "กรุณากลับไปหน้า Main Menu"
+        if "timeout" in message or "หมดเวลา" in message:
+            return "ADB ตอบสนองช้า — ตรวจการเชื่อมต่อ"
+        return "ตรวจความพร้อมไม่ผ่าน — ดู Live Activity"
+
+    def _set_game_stage(self, description):
+        self._game_stage_text = description
+        self._game_stage_at = time.monotonic()
+        self._game_stage_elapsed_second = None
+        self._update_game_stage_elapsed()
+
+    def _update_game_stage_elapsed(self):
+        if not hasattr(self, "game_stage_var"):
+            return
+        started_at = getattr(self, "_game_stage_at", None)
+        description = getattr(self, "_game_stage_text", "ยังไม่เริ่ม")
+        if started_at is None:
+            self.game_stage_var.set(f"สถานะเกม: {description}")
+            return
+        seconds = max(0, int(time.monotonic() - started_at))
+        if seconds == getattr(self, "_game_stage_elapsed_second", None):
+            return
+        self._game_stage_elapsed_second = seconds
+        self.game_stage_var.set(f"สถานะเกม: {description} • {self._format_run_duration(seconds)}")
+
+    def _update_game_stage_from_log(self, line):
+        stage_match = re.search(r"\[STAGE\]\s+name=([A-Z_]+)", line)
+        stage_labels = {
+            "MAINMENU": "หน้า Main Menu",
+            "PURCHASE_ITEM": "กำลังเตรียมไอเทม",
+            "GAME_START": "กำลังเล่นเกม",
+            "GAME_RELAY": "กำลังใช้ Cookie Relay",
+            "GAME_COMPLETE": "กำลังอ่านผลรอบ",
+            "MYSTERY_BOX": "กำลังรับ Mystery Box",
+            "CONGRATULATIONS": "กำลังรับรางวัล",
+            "ANTI_BOT": "กำลังจัดการ Anti-Bot",
+            "CONNECTION_LOST": "กำลังกู้การเชื่อมต่อ",
+            "INACTIVE": "กำลังปลุกเกม",
+        }
+        if stage_match:
+            stage = stage_match.group(1)
+            self._set_game_stage(stage_labels.get(stage, f"กำลังจัดการ {stage.replace('_', ' ').title()}"))
+        elif "[OCR] Reward count-up" in line:
+            self._set_game_stage("กำลังอ่าน Coins และ EXP")
+        elif "No known screen after repeated recovery scans" in line:
+            self._set_game_stage("กำลังกู้หน้าจอที่ไม่รู้จัก")
+        elif "Screen capture failed" in line:
+            self._set_game_stage("ภาพจาก ADB ขัดข้อง")
 
     def _update_session_stats(self, line):
         match = re.search(
@@ -1130,7 +1279,9 @@ class CookieRunBotGUI:
         self.status_label.configure(bg=bg, fg=fg)
 
     def _toggle_boost(self):
-        self.boost_combo.configure(state="readonly" if self.use_boost_var.get() else "disabled")
+        self.boost_combo.configure(
+            state="readonly" if self.use_boost_var.get() and not self._controls_locked else "disabled"
+        )
 
     def _append_log(self, text):
         self.log.configure(state="normal")
@@ -1210,10 +1361,7 @@ class CookieRunBotGUI:
             return
         self._save_settings()
         if running:
-            try:
-                self.process.terminate()
-            except OSError:
-                pass
+            self._terminate_process(self.process)
         self.root.destroy()
 
 

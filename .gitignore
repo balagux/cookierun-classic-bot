@@ -182,3 +182,6 @@ installer/*.exe
 telegram_settings.json
 *.log
 .DS_Store
+
+# Local Qnector workspace memory
+.qnector/

@@ -1,3 +1,4 @@
+import io
 import unittest
 from unittest import mock
 
@@ -5,10 +6,40 @@ import cv2
 import numpy as np
 
 import actions
+import bot
 from bot import should_process_cookie_relay, should_quick_exit_after_relay
 
 
 class RelayQuickExitTests(unittest.TestCase):
+    def test_relay_item_is_used_once_when_banner_reappears(self):
+        screen = np.zeros((720, 1280, 3), dtype=np.uint8)
+        options = {
+            "use_fast_start": False,
+            "use_cookie_relay": True,
+            "quick_exit_after_relay": False,
+            "use_desired_random_boost": False,
+            "claim_relic_rewards": True,
+            "max_runs": 0,
+        }
+        with (
+            mock.patch.object(bot, "device_connect"),
+            mock.patch.object(bot, "device_capture_screen", return_value=screen),
+            mock.patch.object(bot, "load_templates"),
+            mock.patch.object(
+                bot,
+                "detect_stage",
+                side_effect=["PURCHASE_ITEM", "GAME_RELAY", None, "GAME_RELAY", KeyboardInterrupt()],
+            ),
+            mock.patch.object(bot, "purchase_cookie_relay"),
+            mock.patch.object(bot, "play_game"),
+            mock.patch.object(bot, "using_cookie_relay") as use_relay,
+            mock.patch.object(bot.time, "sleep"),
+            mock.patch("sys.stdout", io.StringIO()),
+        ):
+            bot.main(options)
+
+        use_relay.assert_called_once_with(wait_after=True)
+
     def test_relay_is_ignored_before_a_game_run_starts(self):
         self.assertFalse(
             should_process_cookie_relay(

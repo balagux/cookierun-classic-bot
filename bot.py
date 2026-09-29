@@ -290,6 +290,16 @@ def should_claim_relic_rewards(options):
     return bool(options.get("claim_relic_rewards", True))
 
 
+def _handle_anti_bot_or_raise(screen):
+    """Bound Anti-Bot recovery so a bad detection cannot click forever."""
+    if handle_anti_bot(screen):
+        return True
+    raise RuntimeError(
+        "Anti-Bot challenge remains visible after 3 attempts; "
+        "stopping the bot for manual intervention."
+    )
+
+
 def should_quick_exit_after_relay(options):
     """Return whether Cookie Relay should end the run as soon as cookie two starts.
 
@@ -310,13 +320,14 @@ def should_process_cookie_relay(options, run_in_progress):
     )
 
 
-def _is_friends_leaderboard_open(screen):
-    """Return True when the Friends leaderboard overlay covers the main menu.
 
-    This overlay shares the top-left corner with the normal main menu, so
-    ``MAINMENU`` is still detected while it is open.  Tapping the Play!
-    coordinate in that state would hit the leaderboard's own controls (mail,
-    cookie/bake buttons) instead of starting a run.
+def _is_friends_leaderboard_open(screen):
+    """Return True when the Friends leaderboard is open.
+
+    This helper is used only by the one-shot hearts/mailbox workers. The normal
+    game-start path deliberately does not treat the leaderboard as a blocker,
+    because the Friends panel is part of the regular main-menu layout in this
+    game build.
     """
     if screen is None:
         return False
@@ -684,6 +695,7 @@ def main(options=None, device_ip=None, device_port=None):
         session_start_time = time.time()
         session_reset_interval = random.uniform(*SESSION_RESET_INTERVAL)
         run_in_progress = False
+        relay_used_this_run = False
         retry_interrupted_run = False
         relay_quick_exit_pending = False
         relay_quick_exit_rewards = {"coins": 0, "exp": 0}
@@ -723,6 +735,7 @@ def main(options=None, device_ip=None, device_port=None):
                 session_reset_interval = random.uniform(*SESSION_RESET_INTERVAL)
                 detection_group = "PRE_GAME"
                 run_in_progress = False
+                relay_used_this_run = False
                 run_durations.cancel()
                 box_stats.cancel_run()
                 relay_quick_exit_pending = False
@@ -812,6 +825,8 @@ def main(options=None, device_ip=None, device_port=None):
                 continue
 
             last_stage = stage
+            if stage is not None:
+                print(f"[STAGE] name={stage}")
 
             if stage == "MAINMENU":
                 print("🎮 Detected Stage: MAINMENU")
@@ -901,6 +916,7 @@ def main(options=None, device_ip=None, device_port=None):
                 # also clears eligibility before any stale post-game dialog can
                 # be mistaken for a box collected by that run.
                 box_stats.close_run()
+                relay_used_this_run = False
                 # Wait screen refresh
                 refresh_wait = 0.5 if quick_exit_return else 1.0
                 print(f"⏳ Waiting {refresh_wait:.0f} seconds for screen refresh...")
@@ -924,6 +940,7 @@ def main(options=None, device_ip=None, device_port=None):
                     session_reset_interval = random.uniform(*SESSION_RESET_INTERVAL)
                     detection_group = "PRE_GAME"
                     run_in_progress = False
+                    relay_used_this_run = False
                     run_durations.cancel()
                     box_stats.cancel_run()
                     relay_quick_exit_pending = False
@@ -937,6 +954,10 @@ def main(options=None, device_ip=None, device_port=None):
                     detection_group = "PRE_GAME"
                     last_stage = None
                     continue
+                # The live main menu includes the Friends leaderboard panel as
+                # part of its normal layout. Never press Android BACK merely
+                # because Friends templates are visible: BACK opens the game's
+                # "Exit the game?" confirmation and prevents the run from starting.
                 if not is_first_game:
                     if quick_exit_return:
                         print("⚡ Relay quick-exit complete — starting the next run immediately...")
@@ -954,6 +975,7 @@ def main(options=None, device_ip=None, device_port=None):
                 last_stage = None
             elif stage == "PURCHASE_ITEM":
                 print("🛒 Detected Stage: PURCHASE_ITEM")
+                relay_used_this_run = False
                 if options["use_fast_start"]:
                     purchase_fast_start()
                 if options["use_cookie_relay"]:
@@ -993,16 +1015,18 @@ def main(options=None, device_ip=None, device_port=None):
                     time.sleep(0.25)
                     continue
                 if should_process_cookie_relay(options, run_in_progress):
-                    quick_exit_enabled = should_quick_exit_after_relay(options)
-                    if quick_exit_enabled:
-                        using_cookie_relay(wait_after=False)
-                        relay_quick_exit_pending = quick_exit_after_cookie_relay()
-                        last_stage = None
-                    else:
-                        print("🏃 Relay quick-exit is off — waiting for cookie two to die naturally.")
-                        using_cookie_relay()
+                    if not relay_used_this_run:
+                        quick_exit_enabled = should_quick_exit_after_relay(options)
+                        using_cookie_relay(wait_after=not quick_exit_enabled)
+                        relay_used_this_run = True
+                        if quick_exit_enabled:
+                            relay_quick_exit_pending = quick_exit_after_cookie_relay()
+                        else:
+                            print("🏃 Relay quick-exit is off — waiting for cookie two to die naturally.")
                 detection_group = "POST_GAME" if relay_quick_exit_pending else "IN_GAME"
-                last_stage = None
+                # Keep the stage latch while its banner remains visible; one
+                # relay item may only be used once in a run.
+                last_stage = stage
             elif stage == "GAME_COMPLETE":
                 # Snapshot the stage duration before reward animation/OCR waits.
                 if relay_quick_exit_pending:
@@ -1095,37 +1119,40 @@ def main(options=None, device_ip=None, device_port=None):
                 last_stage = None
             elif stage == "MYSTERY_BOX":
                 print("🎁 Detected Stage: MYSTERY_BOX")
-                try:
-                    detected_box_types = detect_mystery_box_types(device_screen)
-                except Exception as exc:
-                    # Box statistics must never prevent the existing reward
-                    # flow from continuing when classification is unavailable.
-                    detected_box_types = []
-                    print(f"[BOX] Mystery Box classification failed: {exc}")
-                if box_stats.record_popup(detected_box_types):
-                    print(
-                        "[BOX] Collected this run: "
-                        + ", ".join(detected_box_types)
-                    )
-                    _print_box_stats(box_stats)
-                    # Keep a running tally so the Telegram summary can report
-                    # total boxes by type without re-reading the screen.
-                    snapshot = box_stats.snapshot()
-                    box_counts = {
-                        name: int(snapshot.get(name, 0))
-                        for name in ("wood", "silver", "gold", "rainbow", "unknown")
-                    }
-                elif not detected_box_types:
-                    print(
-                        "[BOX] Popup detected, but no boxes could be classified; "
-                        "totals were left unchanged and a debug image was saved."
-                    )
-                    save_debug_screen(device_screen)
-                elif not box_stats.run_completed:
-                    print(
-                        "[BOX] Ignored a Mystery Box popup that does not belong "
-                        "to a completed run started by this bot."
-                    )
+                if box_stats.popup_recorded:
+                    # The popup can remain detectable for another animation
+                    # frame after the first accept tap. The run's boxes are
+                    # already committed, so do not re-run classification or
+                    # save a misleading debug screenshot for this duplicate.
+                    print("[BOX] Duplicate Mystery Box frame — this run is already counted.")
+                else:
+                    try:
+                        detected_box_types = detect_mystery_box_types(device_screen)
+                    except Exception as exc:
+                        detected_box_types = []
+                        print(f"[BOX] Mystery Box classification failed: {exc}")
+                    if box_stats.record_popup(detected_box_types):
+                        print(
+                            "[BOX] Collected this run: "
+                            + ", ".join(detected_box_types)
+                        )
+                        _print_box_stats(box_stats)
+                        snapshot = box_stats.snapshot()
+                        box_counts = {
+                            name: int(snapshot.get(name, 0))
+                            for name in ("wood", "silver", "gold", "rainbow", "unknown")
+                        }
+                    elif not detected_box_types:
+                        print(
+                            "[BOX] Popup detected, but no boxes could be classified; "
+                            "totals were left unchanged and a debug image was saved."
+                        )
+                        save_debug_screen(device_screen)
+                    elif not box_stats.run_completed:
+                        print(
+                            "[BOX] Ignored a Mystery Box popup that does not belong "
+                            "to a completed run started by this bot."
+                        )
                 accept_mystery_box()
                 time.sleep(0.5)
                 detection_group = "POST_GAME"
@@ -1279,7 +1306,7 @@ def main(options=None, device_ip=None, device_port=None):
                 last_stage = None
             elif stage == "ANTI_BOT":
                 print("⚠️ Detected Stage: ANTI_BOT")
-                handle_anti_bot(device_screen)
+                _handle_anti_bot_or_raise(device_screen)
                 last_stage = None
             elif stage == "CONNECTION_LOST":
                 print("🔌 Detected Stage: CONNECTION_LOST")
@@ -1289,6 +1316,7 @@ def main(options=None, device_ip=None, device_port=None):
                 session_reset_interval = random.uniform(*SESSION_RESET_INTERVAL)
                 detection_group = "PRE_GAME"
                 run_in_progress = False
+                relay_used_this_run = False
                 run_durations.cancel()
                 box_stats.cancel_run()
                 relay_quick_exit_pending = False

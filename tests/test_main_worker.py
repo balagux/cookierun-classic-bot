@@ -33,6 +33,28 @@ class MainWorkerTests(unittest.TestCase):
             )
         )
 
+    def test_check_ready_requires_main_menu(self):
+        screen = object()
+        with (
+            mock.patch.object(self.main_module, "_check_connection", return_value=screen),
+            mock.patch("detection.load_templates"),
+            mock.patch("detection.detect_stage", return_value=None),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Main Menu not detected"):
+                self.main_module._check_ready("127.0.0.1", 5556)
+
+    def test_check_ready_accepts_main_menu(self):
+        screen = object()
+        with (
+            mock.patch.object(self.main_module, "_check_connection", return_value=screen),
+            mock.patch("detection.load_templates"),
+            mock.patch("detection.detect_stage", return_value="MAINMENU") as detect,
+            mock.patch("builtins.print"),
+        ):
+            self.main_module._check_ready("127.0.0.1", 5556)
+
+        detect.assert_called_once_with(screen, ("MAINMENU",))
+
     def test_wait_relay_death_disables_only_the_quick_exit(self):
         args = self.main_module.build_parser().parse_args(
             ["--run-bot", "--cookie-relay", "--wait-relay-death"]

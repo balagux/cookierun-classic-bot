@@ -622,11 +622,11 @@ class FriendHeartTests(unittest.TestCase):
         self.assertTrue(actions._is_active_friend_life_button(active_screen, match))
         self.assertFalse(actions._is_active_friend_life_button(disabled_screen, match))
 
-    def test_real_rank_107_screenshot_detects_active_rows_not_acknowledgement(self):
+    def test_friend_screenshot_detects_active_rows_not_acknowledgement(self):
         screenshot_path = (
-            Path(actions.__file__).resolve().parent
-            / "debug_screens"
-            / "after_quick_result_ok.png"
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "friends_leaderboard.png"
         )
         screen = cv2.imread(str(screenshot_path))
         self.assertIsNotNone(screen)
@@ -653,9 +653,9 @@ class FriendHeartTests(unittest.TestCase):
 
     def test_real_friend_screenshot_movement_check_ignores_identical_frame(self):
         screenshot_path = (
-            Path(actions.__file__).resolve().parent
-            / "debug_screens"
-            / "after_quick_result_ok.png"
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "friends_leaderboard.png"
         )
         screen = cv2.imread(str(screenshot_path))
         self.assertIsNotNone(screen)

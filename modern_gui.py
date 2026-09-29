@@ -1,4 +1,5 @@
 import threading
+import tkinter as tk
 
 import customtkinter as ctk
 from PIL import Image, ImageDraw, ImageTk
@@ -54,18 +55,17 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         # 125–150% enlargement on high-DPI Windows laptops.
         logical_screen_width = max(1, int(screen_width / window_scaling))
         logical_screen_height = max(1, int(screen_height / window_scaling))
-        # Keep the controller deliberately small so it can sit beside LDPlayer
-        # even on a laptop display. The main pane scrolls when space is tight.
-        window_width = min(
-            logical_screen_width,
-            max(600, min(720, logical_screen_width - 24)),
-        )
-        window_height = min(
-            logical_screen_height,
-            max(420, min(500, logical_screen_height - 80)),
-        )
+        # Keep the original 720x500 companion footprint whenever it fits, but
+        # shrink only on genuinely small/high-DPI displays. CTk geometry uses
+        # logical units while screen dimensions are physical pixels.
+        target_width = 720
+        target_height = 500
+        usable_logical_width = max(1, logical_screen_width - 24)
+        usable_logical_height = max(1, logical_screen_height - 80)
+        window_width = min(target_width, usable_logical_width)
+        window_height = min(target_height, usable_logical_height)
         compact = True
-        sidebar_width = 180 if window_width >= 700 else 168
+        sidebar_width = 180 if window_width >= 700 else min(168, max(140, window_width // 3))
         sidebar_scrollbar_width = 16
         content_width = max(1, window_width - sidebar_width - sidebar_scrollbar_width)
         scaled_window_width = round(window_width * window_scaling)
@@ -91,7 +91,7 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             "relic_switch_row": 4 if content_width < 500 else 2,
             "boost_combo_row": 5 if content_width < 500 else 3,
             "stack_settings": True,
-            "summary_columns": 2,
+            "summary_columns": 2 if content_width >= 420 else 1,
             "summary_tile_count": 5,
             "box_columns": 2 if content_width >= 420 else 1,
         }
@@ -119,6 +119,8 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         minimum_width = min(660, self.layout["width"])
         minimum_height = min(430, self.layout["height"])
         self.root.minsize(minimum_width, minimum_height)
+        # Preserve the original 720x500 footprint; sections scroll internally.
+        self.root.resizable(False, False)
         self.root.configure(fg_color=BG)
 
     @staticmethod
@@ -273,30 +275,20 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         self.root.grid_columnconfigure(1, weight=1)
         self.root.grid_rowconfigure(0, weight=1)
 
-        if self.compact_layout:
-            sidebar = ctk.CTkScrollableFrame(
-                self.root,
-                width=self.sidebar_width,
-                corner_radius=0,
-                border_width=0,
-                fg_color=SIDEBAR,
-                scrollbar_button_color="#343852",
-                scrollbar_button_hover_color="#484D6C",
-            )
-        else:
-            sidebar = ctk.CTkFrame(
-                self.root,
-                width=self.sidebar_width,
-                corner_radius=0,
-                fg_color=SIDEBAR,
-            )
+        # Keep navigation and run controls in one fixed sidebar. The dashboard
+        # itself owns vertical scrolling, so the primary controls never move out
+        # of reach behind a second nested scrollbar.
+        sidebar = ctk.CTkFrame(
+            self.root,
+            width=self.sidebar_width,
+            corner_radius=0,
+            fg_color=SIDEBAR,
+        )
         sidebar.grid(row=0, column=0, sticky="nsew")
         sidebar.grid_columnconfigure(0, weight=1)
-        if not self.compact_layout:
-            sidebar.grid_propagate(False)
-            sidebar.grid_rowconfigure(6, weight=1)
-
-        run_row = 1
+        sidebar.grid_propagate(False)
+        # Row 7 absorbs spare height between quick navigation and run controls.
+        sidebar.grid_rowconfigure(7, weight=1)
 
         brand = ctk.CTkFrame(sidebar, fg_color="transparent")
         brand.grid(
@@ -327,9 +319,62 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             font=self._font(9, "bold"),
         ).pack(anchor="w")
 
+        nav_title = ctk.CTkLabel(
+            sidebar,
+            text="QUICK JUMP",
+            text_color="#666B86",
+            font=self._font(9, "bold"),
+            anchor="w",
+        )
+        # Navigation follows the primary run controls so Start/Stop remains
+        # immediately visible when the compact sidebar opens.
+        nav_title.grid(row=1, column=0, sticky="ew", padx=16, pady=(6, 5))
+        self.nav_buttons = {}
+        self._nav_indicators = {}
+
+        nav_items = [
+            ("dashboard", "⌂", "Dashboard"),
+            ("statistics", "▦", "Statistics"),
+            ("friends", "♥", "Friends"),
+            ("settings", "⚡", "Settings"),
+            ("logs", "≡", "Activity Logs"),
+        ]
+        nav_row = 2
+        for key, icon, label in nav_items:
+            item_row = ctk.CTkFrame(sidebar, fg_color="transparent", height=34)
+            item_row.grid(row=nav_row, column=0, sticky="ew", padx=10, pady=1)
+            item_row.grid_columnconfigure(1, weight=1)
+            item_row.grid_propagate(False)
+
+            indicator = ctk.CTkFrame(
+                item_row,
+                width=3,
+                corner_radius=2,
+                fg_color=PURPLE if key == "dashboard" else "transparent",
+            )
+            indicator.grid(row=0, column=0, sticky="ns", padx=(0, 5), pady=6)
+            indicator.grid_propagate(False)
+
+            button = ctk.CTkButton(
+                item_row,
+                height=32,
+                corner_radius=9,
+                text=f"  {icon}   {label}",
+                anchor="w",
+                fg_color=PURPLE_SOFT if key == "dashboard" else "transparent",
+                hover_color="#292C47",
+                text_color="#FFFFFF" if key == "dashboard" else "#A9ADC1",
+                font=self._font(9, "bold"),
+                command=lambda page=key: self._navigate(page),
+            )
+            button.grid(row=0, column=1, sticky="ew")
+            self.nav_buttons[key] = button
+            self._nav_indicators[key] = indicator
+            nav_row += 1
+
         run_panel = ctk.CTkFrame(sidebar, corner_radius=16, fg_color=SIDEBAR_CARD)
         run_panel.grid(
-            row=run_row,
+            row=8,
             column=0,
             sticky="ew",
             padx=12 if self.compact_layout else 15,
@@ -364,32 +409,7 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             state="disabled",
         )
         self.stop_button.pack(fill="x", padx=12, pady=(7, 7))
-        self.send_hearts_button = ctk.CTkButton(
-            run_panel,
-            height=39,
-            corner_radius=11,
-            text="ส่งหัวใจ",
-            image=self.icons["heart"],
-            fg_color="#2E9F78",
-            hover_color="#38AD85",
-            text_color="#FFFFFF",
-            font=self._font(11, "bold"),
-            command=self._send_hearts,
-        )
-        self.send_hearts_button.pack(fill="x", padx=12, pady=(0, 7))
-        self.mailbox_hearts_button = ctk.CTkButton(
-            run_panel,
-            height=39,
-            corner_radius=11,
-            text="รับหัวใจจากกล่องจดหมาย",
-            image=self.icons["heart"],
-            fg_color="#3D6EA5",
-            hover_color="#4A7FBB",
-            text_color="#FFFFFF",
-            font=self._font(11, "bold"),
-            command=self._send_mailbox_hearts,
-        )
-        self.mailbox_hearts_button.pack(fill="x", padx=12, pady=(0, 12))
+        # Friend-heart and mailbox actions live in the dedicated Friends section below.
         repeat = ctk.CTkFrame(run_panel, fg_color="transparent")
         repeat.pack(fill="x", padx=13)
         ctk.CTkLabel(repeat, text="จำนวนรอบ", text_color="#C1C4D3", font=self._font(10)).pack(side="left")
@@ -423,11 +443,7 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         ctk.CTkLabel(title_copy, text="CookieRun Bot", text_color=TEXT, font=self._font(17, "bold"), anchor="w").pack(anchor="w")
         ctk.CTkLabel(
             title_copy,
-            text=(
-                "ซื้อไอเทม • Start / Stop"
-                if self.narrow_controls
-                else "ตั้งค่าการซื้อไอเทม แล้วเริ่มบอทได้ทันที"
-            ),
+            textvariable=self.game_stage_var,
             text_color=MUTED,
             font=self._font(10),
             anchor="w",
@@ -484,8 +500,18 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         if not self.compact_layout:
             body.grid_rowconfigure(3, weight=1, minsize=150)
 
+        hero = ctk.CTkFrame(body, corner_radius=18, fg_color="#171A2E")
+        hero.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        hero.grid_columnconfigure(0, weight=1)
+        hero_copy = ctk.CTkFrame(hero, fg_color="transparent")
+        hero_copy.grid(row=0, column=0, sticky="w", padx=20, pady=16)
+        ctk.CTkLabel(hero_copy, text="COOKIE RUN AUTOMATION", text_color="#8E94B2", font=self._font(9, "bold")).pack(anchor="w")
+        ctk.CTkLabel(hero_copy, textvariable=self.status_var, text_color="#FFFFFF", font=self._font(19, "bold")).pack(anchor="w", pady=(2, 1))
+        ctk.CTkLabel(hero_copy, textvariable=self.game_stage_var, text_color="#AEB3C9", font=self._font(10)).pack(anchor="w")
+        ctk.CTkLabel(hero, textvariable=self.session_elapsed_var, text_color="#FFFFFF", font=self._font(18, "bold")).grid(row=0, column=1, padx=20)
+
         settings_row = ctk.CTkFrame(body, fg_color="transparent")
-        settings_row.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
+        settings_row.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
         settings_row.grid_columnconfigure(0, weight=1, uniform="settings")
         if not self.layout["stack_settings"]:
             settings_row.grid_columnconfigure(1, weight=1, uniform="settings")
@@ -595,6 +621,11 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             variable=self.claim_relic_rewards_var,
             **switch_args,
         )
+        self.fast_start_switch = fast_start_switch
+        self.cookie_relay_switch = cookie_relay_switch
+        self.relay_quick_exit_switch = relay_quick_exit_switch
+        self.random_boost_switch = random_boost_switch
+        self.relic_reward_switch = relic_reward_switch
         if self.narrow_controls:
             fast_start_switch.grid(row=0, column=0, columnspan=3, sticky="w")
             cookie_relay_switch.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
@@ -641,7 +672,7 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         )
         self.boost_combo.current(0)
 
-        statistics = self._card(body, 1)
+        statistics = self._card(body, 2)
         self._section_header(
             statistics,
             "activity",
@@ -702,7 +733,7 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             columnspan=self.summary_columns,
         )
 
-        log_card = self._card(body, 2, pady=(0, 0))
+        log_card = self._card(body, 3, pady=(0, 0))
         log_header = self._section_header(log_card, "activity", "Live Activity", "ดูสถานะการทำงานแบบเรียลไทม์")
         ctk.CTkButton(
             log_header,
@@ -732,6 +763,167 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         self._append_log("READY  •  ตั้งค่าไอเทม แล้วทดสอบ ADB ก่อนเริ่ม\n")
         self._build_box_stats_tab(boxes_tab)
         self._build_notify_tab(notify_tab)
+        self._build_health_panel(body, row=4)
+        friends_card = self._build_friends_panel(body, row=5)
+
+        # Sidebar items are views into the fixed 720x500 workspace. Extra
+        # content stays inside the dashboard's own scrollbar.
+        self._dashboard_body = body
+        self._nav_targets = {
+            "dashboard": hero,
+            "friends": friends_card,
+            "settings": connection,
+            "logs": log_card,
+        }
+
+    def _navigate(self, page):
+        if page == "statistics":
+            self.workspace_tabs.set("สถิติกล่อง")
+        else:
+            self.workspace_tabs.set("ภาพรวม")
+            target = self._nav_targets.get(page)
+            if target is not None:
+                self._scroll_to_widget(target)
+
+        for key, button in self.nav_buttons.items():
+            active = key == page
+            button.configure(
+                fg_color=PURPLE_SOFT if active else "transparent",
+                text_color="#FFFFFF" if active else "#A9ADC1",
+            )
+            indicator = self._nav_indicators.get(key)
+            if indicator is not None:
+                indicator.configure(fg_color=PURPLE if active else "transparent")
+        if page == "logs":
+            self.log.see("end")
+
+    def _scroll_to_widget(self, widget):
+        """Scroll the dashboard body until the selected section is visible."""
+        body = getattr(self, "_dashboard_body", None)
+        if body is None or widget is None:
+            return
+        try:
+            canvas = body._parent_canvas
+            canvas.update_idletasks()
+            content_height = max(1, body.winfo_reqheight())
+            target_y = max(0, widget.winfo_y() - 8)
+            canvas.yview_moveto(min(1.0, target_y / content_height))
+        except (AttributeError, tk.TclError, ZeroDivisionError):
+            return
+
+    def _build_health_panel(self, parent, row=4):
+        """Compact runtime health view so failures are visible instead of mysterious."""
+        card = ctk.CTkFrame(parent, corner_radius=16, fg_color=CARD, border_width=1, border_color=BORDER)
+        card.grid(row=row, column=0, sticky="ew", pady=(10, 10))
+        self.health_vars = {}
+        self.health_labels = {}
+        self._section_header(card, "activity", "Bot Health", "สถานะของส่วนสำคัญระหว่างทำงาน")
+        grid = ctk.CTkFrame(card, fg_color="transparent")
+        grid.pack(fill="x", padx=16, pady=(0, 14))
+        for column in range(4):
+            grid.grid_columnconfigure(column, weight=1)
+        items = [
+            ("ADB", "เชื่อมต่ออุปกรณ์"),
+            ("SCREEN", "จับภาพหน้าจอ"),
+            ("DETECT", "ตรวจจับ UI"),
+            ("STATE", "สถานะเกม"),
+        ]
+        for column, (key, detail) in enumerate(items):
+            tile = ctk.CTkFrame(grid, corner_radius=12, fg_color="#F8F8FC")
+            tile.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 4, 0 if column == 3 else 4))
+            state_var = ctk.StringVar(value="● WAIT")
+            self.health_vars[key] = state_var
+            state_label = ctk.CTkLabel(
+                tile,
+                textvariable=state_var,
+                text_color="#9A6A16",
+                font=self._font(11, "bold"),
+            )
+            state_label.pack(anchor="w", padx=11, pady=(9, 2))
+            self.health_labels[key] = state_label
+            ctk.CTkLabel(tile, text=detail, text_color=MUTED, font=self._font(8)).pack(anchor="w", padx=11, pady=(0, 9))
+        return card
+
+    def _build_friends_panel(self, parent, row=5):
+        """Dedicated Friends section for the sidebar navigation."""
+        card = ctk.CTkFrame(parent, corner_radius=16, fg_color=CARD, border_width=1, border_color=BORDER)
+        card.grid(row=row, column=0, sticky="ew", pady=(0, 10))
+        self._section_header(card, "heart", "Friends", "ส่งหัวใจให้เพื่อนจากหน้า Friends leaderboard")
+        ctk.CTkLabel(
+            card,
+            text="เปิดหน้า Friends ในเกมก่อน แล้วกดปุ่มด้านล่างเพื่อเริ่มส่งหัวใจทีละคน",
+            text_color=MUTED,
+            font=self._font(9),
+            anchor="w",
+        ).pack(fill="x", padx=16, pady=(0, 10))
+        self.send_hearts_button = ctk.CTkButton(
+            card,
+            height=38,
+            corner_radius=10,
+            text="ส่งหัวใจให้เพื่อน",
+            image=self.icons["heart"],
+            fg_color="#2E9F78",
+            hover_color="#38AD85",
+            text_color="#FFFFFF",
+            font=self._font(10, "bold"),
+            command=self._send_hearts,
+        )
+        self.send_hearts_button.pack(fill="x", padx=16, pady=(0, 8))
+        self.mailbox_hearts_button = ctk.CTkButton(
+            card,
+            height=38,
+            corner_radius=10,
+            text="รับหัวใจจากกล่องจดหมาย",
+            image=self.icons["heart"],
+            fg_color="#3D6EA5",
+            hover_color="#4A7FBB",
+            text_color="#FFFFFF",
+            font=self._font(10, "bold"),
+            command=self._send_mailbox_hearts,
+        )
+        self.mailbox_hearts_button.pack(fill="x", padx=16, pady=(0, 14))
+        return card
+
+    def _set_health(self, key, state):
+        var = self.health_vars.get(key)
+        if var is None:
+            return
+        labels = {"ok": "● OK", "warn": "● WAIT", "error": "● ERROR", "idle": "● IDLE"}
+        colors = {"ok": "#23815C", "warn": "#9A6A16", "error": "#B02D4A", "idle": "#777D91"}
+        var.set(labels.get(state, "● WAIT"))
+        label = self.health_labels.get(key)
+        if label is not None:
+            label.configure(text_color=colors.get(state, colors["warn"]))
+
+    def _set_game_stage(self, description):
+        """Keep health indicators evidence-based while the base GUI owns stage text."""
+        super()._set_game_stage(description)
+        if not hasattr(self, "health_vars"):
+            return
+
+        if description == "ความละเอียดเกมต้องเป็น 1280×720":
+            self._set_health("ADB", "ok")
+            self._set_health("SCREEN", "error")
+            self._set_health("DETECT", "idle")
+            self._set_health("STATE", "error")
+        elif description == "กรุณากลับไปหน้า Main Menu":
+            self._set_health("ADB", "ok")
+            self._set_health("SCREEN", "ok")
+            self._set_health("DETECT", "error")
+            self._set_health("STATE", "error")
+        elif description == "ADB ตอบสนองช้า — ตรวจการเชื่อมต่อ":
+            self._set_health("ADB", "error")
+            self._set_health("SCREEN", "idle")
+            self._set_health("DETECT", "idle")
+            self._set_health("STATE", "error")
+        elif description == "ภาพจาก ADB ขัดข้อง":
+            self._set_health("ADB", "warn")
+            self._set_health("SCREEN", "error")
+            self._set_health("DETECT", "idle")
+            self._set_health("STATE", "warn")
+        elif description in ("กำลังเริ่มบอท", "หน้า Main Menu", "กำลังเล่นเกม", "กำลังใช้ Cookie Relay", "กำลังอ่านผลรอบ"):
+            for key in ("ADB", "SCREEN", "DETECT", "STATE"):
+                self._set_health(key, "ok")
 
     def _build_box_stats_tab(self, parent):
         parent.grid_columnconfigure(0, weight=1)
@@ -1031,8 +1223,27 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         self.status_var.set(text)
         self.status_label.configure(fg_color=background, text_color=foreground)
 
+        if not hasattr(self, "health_vars"):
+            return
+        if text == "เชื่อมต่อสำเร็จ":
+            self._set_health("ADB", "ok")
+            self._set_health("SCREEN", "ok")
+            self._set_health("DETECT", "idle")
+            self._set_health("STATE", "idle")
+        elif text == "เชื่อมต่อไม่สำเร็จ":
+            self._set_health("ADB", "error")
+            self._set_health("SCREEN", "idle")
+            self._set_health("DETECT", "idle")
+            self._set_health("STATE", "idle")
+        elif text == "บอทกำลังทำงาน":
+            # The bot process is launched only after --check-ready succeeds.
+            for key in ("ADB", "SCREEN", "DETECT", "STATE"):
+                self._set_health(key, "ok")
+
     def _toggle_boost(self):
-        self.boost_combo.configure(state="normal" if self.use_boost_var.get() else "disabled")
+        self.boost_combo.configure(
+            state="normal" if self.use_boost_var.get() and not self._controls_locked else "disabled"
+        )
 
 
 def launch_gui():

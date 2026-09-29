@@ -5,6 +5,54 @@ import adb
 
 
 class AdbResetTests(unittest.TestCase):
+    def test_adb_run_has_a_bounded_default_timeout(self):
+        completed = mock.Mock(returncode=0, stdout="", stderr="")
+        with mock.patch.object(adb.subprocess, "run", return_value=completed) as run:
+            adb.adb_run(["adb", "devices"])
+
+            self.assertEqual(run.call_args.kwargs["timeout"], adb.ADB_COMMAND_TIMEOUT)
+            self.assertEqual(run.call_args.kwargs["creationflags"], adb.ADB_SUBPROCESS_FLAGS)
+
+            run.reset_mock()
+            adb.adb_run(["adb", "devices"], timeout=1.25)
+
+            self.assertEqual(run.call_args.kwargs["timeout"], 1.25)
+
+    def test_find_adb_falls_back_to_ldplayer_install(self):
+        ldplayer = r"D:\LDPlayer\LDPlayer14\adb.exe"
+
+        def exists(candidate):
+            return str(candidate) == ldplayer
+
+        with (
+            mock.patch.object(adb.Path, "exists", autospec=True, side_effect=exists),
+            mock.patch.object(adb.shutil, "which", return_value=None),
+        ):
+            self.assertEqual(adb._find_adb_executable(), ldplayer)
+
+    def test_remote_host_does_not_resolve_to_local_emulator(self):
+        with (
+            mock.patch.dict(adb._DEVICE_TARGET_CACHE, {}, clear=True),
+            mock.patch.object(adb, "adb_run") as adb_command,
+        ):
+            target = adb._resolve_device_target("192.168.1.20", 5556)
+
+        self.assertEqual(target, "192.168.1.20:5556")
+        adb_command.assert_not_called()
+
+    def test_tap_failures_are_reported(self):
+        failed = mock.Mock(returncode=1, stdout="", stderr="device offline")
+        with (
+            mock.patch.object(adb, "_resolve_device_target", return_value="emulator-5556"),
+            mock.patch.object(adb, "adb_run", return_value=failed),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "device offline"):
+                adb.device_tap("127.0.0.1", 5556, 100, 200)
+            with self.assertRaisesRegex(RuntimeError, "device offline"):
+                adb.safe_device_tap("127.0.0.1", 5556, 100, 200)
+            with self.assertRaisesRegex(RuntimeError, "device offline"):
+                adb.device_back("127.0.0.1", 5556)
+
     def test_deterministic_scroll_uses_exact_requested_coordinates(self):
         completed = mock.Mock(returncode=0, stdout="", stderr="")
         with (

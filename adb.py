@@ -12,6 +12,7 @@ from runtime_paths import APP_DIR
 
 
 ADB_SUBPROCESS_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+ADB_COMMAND_TIMEOUT = 10.0
 _DEVICE_TARGET_CACHE = {}
 _DEVICE_TARGET_CACHE_LOCK = threading.Lock()
 _DEVICE_TARGET_CACHE_TTL = 5.0
@@ -20,6 +21,7 @@ _DEVICE_TARGET_CACHE_TTL = 5.0
 def adb_run(command, **kwargs):
     """Run ADB without opening a console window on Windows."""
     kwargs.setdefault("creationflags", ADB_SUBPROCESS_FLAGS)
+    kwargs.setdefault("timeout", ADB_COMMAND_TIMEOUT)
     return subprocess.run(command, **kwargs)
 
 
@@ -27,6 +29,13 @@ def _find_adb_executable():
     candidates = (
         APP_DIR / "platform-tools" / "adb.exe",
         Path(r"D:\platform-tools-latest-windows\platform-tools\adb.exe"),
+        # LDPlayer ships its own compatible ADB. Prefer known install paths
+        # before falling back to PATH so packaged builds remain self-recovering
+        # when a standalone platform-tools folder is moved or removed.
+        Path(r"D:\LDPlayer\LDPlayer14\adb.exe"),
+        Path(r"C:\LDPlayer\LDPlayer14\adb.exe"),
+        Path(r"D:\LDPlayer\LDPlayer9\adb.exe"),
+        Path(r"C:\LDPlayer\LDPlayer9\adb.exe"),
     )
     for candidate in candidates:
         if candidate.exists():
@@ -48,21 +57,24 @@ def _resolve_device_target(ip: str, port: int):
         if cached is not None and now - cached[0] < _DEVICE_TARGET_CACHE_TTL:
             return cached[1]
 
-    devices_result = adb_run(
-        [ADB_EXECUTABLE, "devices"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    if devices_result.returncode == 0:
-        for line in devices_result.stdout.splitlines():
-            parts = line.split()
-            if len(parts) >= 2 and parts[1].lower() == "device":
-                serial = parts[0]
-                if serial.startswith("emulator-") and serial.endswith(str(port)):
-                    with _DEVICE_TARGET_CACHE_LOCK:
-                        _DEVICE_TARGET_CACHE[cache_key] = (time.monotonic(), serial)
-                    return serial
+    # An emulator serial represents the local host only. A remote host may use
+    # the same port, but must never be redirected to the local emulator.
+    if str(ip).strip().lower() in {"127.0.0.1", "localhost", "::1"}:
+        devices_result = adb_run(
+            [ADB_EXECUTABLE, "devices"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if devices_result.returncode == 0:
+            for line in devices_result.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 2 and parts[1].lower() == "device":
+                    serial = parts[0]
+                    if serial == f"emulator-{port}":
+                        with _DEVICE_TARGET_CACHE_LOCK:
+                            _DEVICE_TARGET_CACHE[cache_key] = (time.monotonic(), serial)
+                        return serial
 
     target = f"{ip}:{port}"
     with _DEVICE_TARGET_CACHE_LOCK:
@@ -109,35 +121,44 @@ def device_capture_screen(ip: str, port: int):
 
 def device_tap(ip: str, port: int, x: int, y: int):
     target = _resolve_device_target(ip, port)
-    adb_run(
+    result = adb_run(
         [ADB_EXECUTABLE, "-s", target, "shell", "input", "tap", str(x), str(y)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
+    if result.returncode != 0:
+        error = (result.stderr or result.stdout or "unknown ADB error").strip()
+        raise RuntimeError(f"ADB tap failed: {error}")
 
 
 def safe_device_tap(ip: str, port: int, x: int, y: int):
     target = _resolve_device_target(ip, port)
     jitter_x = x + random.randint(-15, 15)
     jitter_y = y + random.randint(-15, 15)
-    adb_run(
+    result = adb_run(
         [ADB_EXECUTABLE, "-s", target, "shell", "input", "tap", str(jitter_x), str(jitter_y)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
+    if result.returncode != 0:
+        error = (result.stderr or result.stdout or "unknown ADB error").strip()
+        raise RuntimeError(f"ADB tap failed: {error}")
 
 
 def device_back(ip: str, port: int):
     """Press the Android BACK key to close overlays/dialogs and return home."""
     target = _resolve_device_target(ip, port)
-    adb_run(
+    result = adb_run(
         [ADB_EXECUTABLE, "-s", target, "shell", "input", "keyevent", "4"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
+    if result.returncode != 0:
+        error = (result.stderr or result.stdout or "unknown ADB error").strip()
+        raise RuntimeError(f"ADB BACK failed: {error}")
 
 
 def device_scroll(ip: str, port: int, x: int, y: int, direction: str = "up", distance: int = 500, duration: int = 300):

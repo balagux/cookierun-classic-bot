@@ -1,12 +1,23 @@
-# CookieRun Classic Bot
+﻿# CookieRun Classic Bot
 
 โปรแกรมช่วยจัดการรอบ CookieRun Classic บน Windows ผ่าน ADB และ OpenCV โดยเน้นเมนูที่จำเป็น:
 เชื่อมต่อเกม เลือกซื้อไอเทม และสั่ง START/STOP บอทจากหน้าต่างขนาดกะทัดรัด
 
-> เวอร์ชันปัจจุบัน: **1.4.6**
+> เวอร์ชันปัจจุบัน: **1.4.15**
 >
 > โปรแกรมนี้เป็นโครงการทดลองด้าน Automation และ Computer Vision การใช้งานกับบัญชีจริง
 > อาจขัดกับข้อกำหนดของเกม ผู้ใช้ต้องรับผิดชอบความเสี่ยงด้วยตนเอง
+
+## รุ่น 1.4.15
+
+- รวมฟีเจอร์จาก v1.4.14 (Telegram notifications, News popup recovery และ Mailbox Hearts) เข้ากับชุด reliability fixes
+- เพิ่ม START preflight ตรวจ ADB, ความละเอียด 1280×720 และ Main Menu ก่อนเริ่ม
+- ปรับ GUI/CustomTkinter, Bot Health, Quick Jump และ Start/Stop ให้ใช้งานได้ดีขึ้นในหน้าต่าง 720×500
+- เพิ่ม ADB fallback สำหรับ LDPlayer 14/9 และ timeout 10 วินาทีสำหรับคำสั่ง ADB
+- แก้ STOP ของ PyInstaller one-file ให้ปิดทั้ง process tree ไม่ทิ้ง worker เบื้องหลัง
+- แก้ Friends/Main Menu false-positive, Mystery Box frame ซ้ำ และ Cookie Relay ใช้ซ้ำในรอบเดียว
+- แก้ Daily Check-in ถูกตรวจผิดเป็น Anti-Bot พร้อม fail-safe หยุดบอทหาก Anti-Bot แก้ไม่สำเร็จหลัง 3 ครั้ง
+- ผ่าน stress test เกมจริง 10 รอบ; รายละเอียด automated tests และ hashes อยู่ใน `release_notes_v1415.md`
 
 ## รุ่น 1.4.6
 
@@ -94,7 +105,11 @@
 
 1. `platform-tools\adb.exe` ที่อยู่ข้างโปรแกรม
 2. `D:\platform-tools-latest-windows\platform-tools\adb.exe`
-3. ADB ที่อยู่ในตัวแปร `PATH`
+3. `D:\LDPlayer\LDPlayer14\adb.exe`
+4. `C:\LDPlayer\LDPlayer14\adb.exe`
+5. `D:\LDPlayer\LDPlayer9\adb.exe`
+6. `C:\LDPlayer\LDPlayer9\adb.exe`
+7. ADB ที่อยู่ในตัวแปร `PATH`
 
 ## เริ่มใช้งาน
 
@@ -108,7 +123,8 @@
 8. ถ้าใช้ Cookie Relay ให้เลือกว่าจะ **ออกเร็วเมื่อไม้ 2 เริ่มวิ่ง** หรือปิดเพื่อรอจนไม้ 2 ตาย
 9. เปิด **รับ Relic อัตโนมัติ** เมื่อต้องการกด Get/Claim หรือปิดเพื่อดองชิ้นส่วน
 10. กำหนดจำนวนรอบ โดย `0` หมายถึงเล่นต่อเนื่อง
-11. กด **START BOT** และกด **STOP BOT** เมื่อต้องการหยุด
+11. กด **START BOT** โปรแกรมจะตรวจ ADB, ความละเอียด และหน้า Main Menu ก่อนเริ่มรอบ หากไม่พร้อมจะแจ้งสาเหตุโดยไม่สั่งเริ่มเกม
+12. ระหว่างทำงาน ดูขั้นตอนปัจจุบันและเวลาที่อยู่ในขั้นตอนนั้นใต้ชื่อโปรแกรม ตัวเลือกการเล่นจะถูกล็อกจนกว่าบอทจะหยุด แล้วกด **STOP BOT** เมื่อต้องการหยุด
 
 เมื่อกด START BOT โปรแกรมจะรีเซ็ตจำนวนรอบ Coins/EXP สถิติกล่อง ค่าเฉลี่ย เวลาจบรอบ และเวลาของ Session ใหม่
 
@@ -231,7 +247,7 @@ OCR ทำงานภายในเครื่องด้วย RapidOCR/ONN
 ### เชื่อมต่อ ADB ไม่ได้
 
 - ตรวจ IP/Port เช่น `127.0.0.1:5556`
-- ตรวจว่า `adb.exe` อยู่ที่ `D:\platform-tools-latest-windows\platform-tools\adb.exe`
+- ตรวจว่า `adb.exe` อยู่ใน standalone Platform Tools, โฟลเดอร์ LDPlayer 14/9 หรืออยู่ใน `PATH`
 - ตรวจ Firewall และการตั้งค่า ADB debugging ใน Emulator
 - หากใช้หลาย Instance ให้เลือก Port ของหน้าต่างที่เปิดเกมอยู่
 

@@ -789,6 +789,8 @@ def handle_send_friend_life(
     settle_poll_attempts=8,
     scroll_attempts=2,
     scroll_settle_poll_attempts=6,
+    recovery_capture_attempts=4,
+    recovery_sleep=0.25,
 ):
     """Send each visible active friend heart once, recapturing after every tap.
 
@@ -905,10 +907,21 @@ def handle_send_friend_life(
                 f"{sent_count} confirmed heart(s)."
             )
         if not has_ready_leaderboard(screen):
-            raise RuntimeError(
-                "The Friends leaderboard is covered or no longer ready. "
-                f"Stopped safely after {sent_count} confirmed heart(s)."
-            )
+            # One animation/dim frame is not a failure. Re-capture before
+            # aborting the heart worker.
+            recovered = False
+            for _ in range(max(1, int(recovery_capture_attempts))):
+                sleep_func(max(0.0, float(recovery_sleep)))
+                screen = capture_or_raise()
+                if has_ready_leaderboard(screen):
+                    recovered = True
+                    break
+            if not recovered:
+                raise RuntimeError(
+                    "The Friends leaderboard could not be recovered after "
+                    f"{max(1, int(recovery_capture_attempts))} screen checks. "
+                    f"Stopped safely after {sent_count} confirmed heart(s)."
+                )
         heart_matches = active_hearts(screen)
         if heart_matches:
             if sent_count >= max(0, int(max_heart_sends)):

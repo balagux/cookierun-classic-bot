@@ -62,17 +62,20 @@ class GuiLayoutTests(unittest.TestCase):
         self.assertEqual(layout["relic_switch_row"], 2)
         self.assertEqual(layout["boost_combo_row"], 3)
 
-    def test_small_hidpi_screen_stacks_wide_controls(self):
+    def test_small_hidpi_screen_shrinks_only_when_required_to_fit(self):
         layout = ModernCookieRunBotGUI._layout_for_screen(800, 600, 1.5)
 
-        self.assertEqual((layout["width"], layout["height"]), (533, 400))
-        self.assertEqual((layout["x"], layout["y"]), (0, 0))
+        self.assertEqual((layout["width"], layout["height"]), (509, 320))
+        self.assertEqual((layout["x"], layout["y"]), (18, 0))
         self.assertTrue(layout["narrow_controls"])
         self.assertEqual(layout["relay_quick_exit_row"], 2)
         self.assertEqual(layout["relic_switch_row"], 4)
         self.assertEqual(layout["boost_combo_row"], 5)
-        self.assertLess(layout["content_width"], 500)
+        self.assertEqual(layout["content_width"], 325)
+        self.assertEqual(layout["summary_columns"], 1)
         self.assertEqual(layout["box_columns"], 1)
+        self.assertLessEqual(round(layout["width"] * 1.5), 800)
+        self.assertLessEqual(round(layout["height"] * 1.5), 600 - 80)
 
 
 if __name__ == "__main__":

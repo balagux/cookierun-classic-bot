@@ -33,6 +33,7 @@ class GuiStartCommandTests(unittest.TestCase):
     def test_start_keeps_item_options_without_any_recorder_arguments(self):
         gui = object.__new__(CookieRunBotGUI)
         gui.process = None
+        gui.connection_test_running = False
         gui.fast_start_var = _Value(True)
         gui.cookie_relay_var = _Value(True)
         gui.relay_quick_exit_var = _Value(True)
@@ -42,14 +43,13 @@ class GuiStartCommandTests(unittest.TestCase):
         gui.boost_combo = _Combo(2)
         gui._base_command = lambda mode: ["worker", mode]
 
-        launched = []
-        gui._launch_process = lambda command, mode: launched.append((command, mode))
+        pending = []
+        gui._begin_start_preflight = lambda command: pending.append(command)
 
         gui._start_bot()
 
-        self.assertEqual(len(launched), 1)
-        command, mode = launched[0]
-        self.assertEqual(mode, "bot")
+        self.assertEqual(len(pending), 1)
+        command = pending[0]
         self.assertIn("--fast-start", command)
         self.assertIn("--cookie-relay", command)
         self.assertIn("--quick-exit-after-relay", command)
@@ -60,6 +60,71 @@ class GuiStartCommandTests(unittest.TestCase):
         command_text = " ".join(command).lower()
         for removed_option in ("record", "replay", "profile", "ldplayer"):
             self.assertNotIn(removed_option, command_text)
+
+    def test_preflight_pass_starts_pending_bot_command(self):
+        gui = object.__new__(CookieRunBotGUI)
+        gui.events = queue.Queue()
+        gui.events.put(("start_preflight_result", (0, "Main Menu ready\n")))
+        gui._pending_start_command = ["worker", "--run-bot"]
+        gui.connection_test_running = True
+        gui.process_mode = None
+        gui.root = mock.Mock()
+        gui._set_running_controls = mock.Mock()
+        gui._append_log = mock.Mock()
+        gui._set_game_stage = mock.Mock()
+        gui._launch_process = mock.Mock()
+
+        gui._poll_events()
+
+        gui._launch_process.assert_called_once_with(["worker", "--run-bot"], "bot")
+        self.assertFalse(gui.connection_test_running)
+        self.assertIsNone(gui._pending_start_command)
+
+    def test_preflight_failure_does_not_start_bot(self):
+        gui = object.__new__(CookieRunBotGUI)
+        gui.events = queue.Queue()
+        gui.events.put(("start_preflight_result", (1, "Main Menu not detected\n")))
+        gui._pending_start_command = ["worker", "--run-bot"]
+        gui.connection_test_running = True
+        gui.process_mode = None
+        gui.root = mock.Mock()
+        gui._set_running_controls = mock.Mock()
+        gui._append_log = mock.Mock()
+        gui._set_game_stage = mock.Mock()
+        gui._set_status = mock.Mock()
+        gui._launch_process = mock.Mock()
+
+        gui._poll_events()
+
+        gui._launch_process.assert_not_called()
+        gui._set_status.assert_called_once_with("ยังไม่พร้อมเริ่ม", "error")
+        gui._set_game_stage.assert_called_once_with("กรุณากลับไปหน้า Main Menu")
+
+    def test_play_options_are_locked_while_worker_runs(self):
+        gui = object.__new__(CookieRunBotGUI)
+        gui.fast_start_switch = mock.Mock()
+        gui.cookie_relay_switch = mock.Mock()
+        gui.relay_quick_exit_switch = mock.Mock()
+        gui.random_boost_switch = mock.Mock()
+        gui.relic_reward_switch = mock.Mock()
+        gui.boost_combo = mock.Mock()
+        gui.use_boost_var = _Value(True)
+
+        gui._set_play_option_controls(True)
+        self.assertEqual(gui.boost_combo.configure.call_args.kwargs["state"], "disabled")
+        self.assertEqual(gui.fast_start_switch.configure.call_args.kwargs["state"], "disabled")
+
+        gui._set_play_option_controls(False)
+        self.assertEqual(gui.boost_combo.configure.call_args.kwargs["state"], "readonly")
+        self.assertEqual(gui.fast_start_switch.configure.call_args.kwargs["state"], "normal")
+
+    def test_stage_log_updates_visible_game_status(self):
+        gui = object.__new__(CookieRunBotGUI)
+        gui._set_game_stage = mock.Mock()
+
+        gui._update_game_stage_from_log("[STAGE] name=GAME_RELAY\n")
+
+        gui._set_game_stage.assert_called_once_with("กำลังใช้ Cookie Relay")
 
     def test_relic_auto_claim_default_does_not_send_keep_parts_flag(self):
         gui = object.__new__(CookieRunBotGUI)
