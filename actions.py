@@ -91,7 +91,8 @@ from config import (
 from detection import (
     detect_all_template_matches,
     detect_templates,
-    detect_anti_bot_odd_cards,
+    detect_anti_bot_card_candidates,
+    detect_anti_bot_instruction,
     detect_stage,
 )
 from debug import save_debug_screen
@@ -556,34 +557,44 @@ def close_relic_claim_without_reward():
 
 
 def handle_anti_bot(screen):
-    print("🤖 Solving Anti-Bot captcha...")
+    print("?? Solving Anti-Bot captcha...")
     card_coords = [
         ANTI_BOT_CARD_POS_1, ANTI_BOT_CARD_POS_2, ANTI_BOT_CARD_POS_3,
         ANTI_BOT_CARD_POS_4, ANTI_BOT_CARD_POS_5, ANTI_BOT_CARD_POS_6,
     ]
 
     current_screen = screen
+    attempted_cards = set()
     for attempt in range(1, 4):
-        odd_indices = detect_anti_bot_odd_cards(current_screen)
-        if not odd_indices:
-            print("❌ Could not identify an Anti-Bot card.")
+        instruction = detect_anti_bot_instruction(current_screen)
+        if instruction is None:
+            print("? Could not determine the Anti-Bot instruction.")
             return False
-        idx = odd_indices[0]
+        candidates = detect_anti_bot_card_candidates(current_screen, instruction)
+        candidates = [index for index in candidates if index not in attempted_cards]
+        if not candidates:
+            print("? Could not identify another Anti-Bot card candidate.")
+            return False
+
+        idx = candidates[0]
+        attempted_cards.add(idx)
         cx, cy = card_coords[idx]
         tx = cx + ANTI_BOT_CARD_WIDTH // 2
         ty = cy + ANTI_BOT_CARD_HEIGHT // 2
-        print(f"  👆 Attempt {attempt}/3: tapping Card {idx + 1} at ({tx}, {ty})")
+        print(
+            f"  ?? Attempt {attempt}/3 ({instruction}): "
+            f"tapping Card {idx + 1} at ({tx}, {ty})"
+        )
         device_tap(DEVICE_IP, DEVICE_PORT, tx, ty)
         time.sleep(0.35)
         current_screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
         if detect_stage(current_screen, ("ANTI_BOT",)) != "ANTI_BOT":
-            print("✅ Anti-Bot captcha solved!")
+            print("? Anti-Bot captcha solved!")
             return True
-        print("🔄 Anti-Bot is still visible — recapturing and recalculating.")
+        print("?? Anti-Bot is still visible ? trying the next ranked candidate.")
 
-    print("❌ Anti-Bot was not solved after 3 attempts.")
+    print("? Anti-Bot was not solved after 3 distinct candidates.")
     return False
-
 
 def handle_connection_lost():
     print("🔌 Handling Connection Lost...")

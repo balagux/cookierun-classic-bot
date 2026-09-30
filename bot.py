@@ -291,14 +291,18 @@ def should_claim_relic_rewards(options):
 
 
 def _handle_anti_bot_or_raise(screen):
-    """Bound Anti-Bot recovery so a bad detection cannot click forever."""
+    """Bound Anti-Bot recovery and preserve evidence when it cannot be solved."""
     if handle_anti_bot(screen):
         return True
+    try:
+        save_debug_screen(screen)
+        print("?? Saved the failed Anti-Bot screen for diagnosis.")
+    except Exception as exc:
+        print(f"?? Could not save failed Anti-Bot screenshot: {exc}")
     raise RuntimeError(
-        "Anti-Bot challenge remains visible after 3 attempts; "
+        "Anti-Bot challenge remains visible after 3 distinct candidates; "
         "stopping the bot for manual intervention."
     )
-
 
 def should_quick_exit_after_relay(options):
     """Return whether Cookie Relay should end the run as soon as cookie two starts.

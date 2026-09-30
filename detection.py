@@ -223,17 +223,67 @@ def _is_anti_bot_screen(screen):
     return beige_cards >= 5
 
 
-def detect_anti_bot_odd_cards(screen):
-    """
-    Return likely sliding-card indices, most likely first.
+def _anti_bot_jumping_word_score(screen):
+    """Return correlation for the word ``jumping`` in the Anti-Bot header.
 
-    The running sprite is narrow/upright, while the sliding sprite is wide,
-    low, and concentrated in the lower half. Measuring that foreground shape
-    is more reliable than correlating the whole card, whose border/background
-    previously made normal bottom-row cards look different.
+    The full jumping/sliding headers share almost all pixels, so matching the
+    entire banner can confuse the two instructions. We first align the known
+    jumping banner, then compare only the word that differs.
     """
+    screen_gray = _normalize_gray(screen)
+    if screen_gray is None:
+        return 0.0
+    region = STAGE_REGIONS.get("ANTI_BOT")
+    template_files = STAGE_TEMPLATES.get("ANTI_BOT", ())
+    if region is None or not template_files:
+        return 0.0
+    header_template = _get_template_gray(template_files[0])
+    if header_template is None:
+        return 0.0
+    search_area = _crop_region(screen_gray, region)
+    if (
+        search_area.shape[0] < header_template.shape[0]
+        or search_area.shape[1] < header_template.shape[1]
+    ):
+        return 0.0
 
-    # Define card coordinates based on config constants
+    alignment = cv2.matchTemplate(search_area, header_template, cv2.TM_CCOEFF_NORMED)
+    _, _, _, max_loc = cv2.minMaxLoc(alignment)
+    offset_x, offset_y = max_loc
+
+    # Tight crop around the word "jumping" in ANTI_BOT_1.png. Keeping only
+    # the differing word prevents common text such as "Surprise! Find the"
+    # and "card!" from dominating the score.
+    word_x1, word_y1, word_x2, word_y2 = (410, 15, 545, 75)
+    word_template = header_template[word_y1:word_y2, word_x1:word_x2]
+    word_screen = search_area[
+        offset_y + word_y1:offset_y + word_y2,
+        offset_x + word_x1:offset_x + word_x2,
+    ]
+    if word_screen.shape != word_template.shape or word_template.size == 0:
+        return 0.0
+    score = cv2.matchTemplate(word_screen, word_template, cv2.TM_CCOEFF_NORMED)
+    return float(score[0, 0])
+
+
+def detect_anti_bot_instruction(screen):
+    """Return the requested Anti-Bot pose: ``jumping`` or ``sliding``."""
+    screen_bgr = _normalize(screen)
+    if screen_bgr is None:
+        return None
+    if not _is_anti_bot_screen(screen_bgr):
+        return None
+
+    jumping_score = _anti_bot_jumping_word_score(screen_bgr)
+    print(f"  Anti-Bot jumping-word score: {jumping_score:.3f}")
+    # Self-match is ~1.0. A deliberately changed instruction word drops well
+    # below this threshold while small antialiasing/compression differences do
+    # not, so the fallback can safely represent the alternate sliding wording.
+    return "jumping" if jumping_score >= 0.72 else "sliding"
+
+
+def _anti_bot_pose_scores(screen):
+    """Return one sliding-likelihood score for each Anti-Bot card."""
     card_coords = [
         ANTI_BOT_CARD_POS_1,
         ANTI_BOT_CARD_POS_2,
@@ -242,16 +292,19 @@ def detect_anti_bot_odd_cards(screen):
         ANTI_BOT_CARD_POS_5,
         ANTI_BOT_CARD_POS_6,
     ]
-
     screen_bgr = _normalize(screen)
     if screen_bgr is None:
         return []
+
     scores = []
     for cx, cy in card_coords:
         inner = screen_bgr[
             cy + 20:cy + ANTI_BOT_CARD_HEIGHT - 20,
             cx + 20:cx + ANTI_BOT_CARD_WIDTH - 20,
         ]
+        if inner.size == 0:
+            scores.append(float("-inf"))
+            continue
         hsv = cv2.cvtColor(inner, cv2.COLOR_BGR2HSV)
         foreground = cv2.inRange(hsv, (0, 80, 30), (179, 255, 255))
         ys, xs = np.where(foreground > 0)
@@ -264,9 +317,29 @@ def detect_anti_bot_odd_cards(screen):
         centroid_y = float(ys.mean()) / inner.shape[0]
         lower_ratio = float((ys > inner.shape[0] * 0.5).mean())
         scores.append((aspect * 2.0) + centroid_y + lower_ratio)
+    return scores
 
-    ranked = list(np.argsort(np.asarray(scores))[::-1])
-    print("🔍 Analyzing Anti-Bot card poses...")
+
+def detect_anti_bot_card_candidates(screen, target="sliding"):
+    """Rank all six cards for the requested pose, best candidate first."""
+    if target not in ("jumping", "sliding"):
+        return []
+    scores = _anti_bot_pose_scores(screen)
+    if not scores:
+        return []
+
+    # High score = wide/low (sliding). Low score = narrow/upright or little
+    # lower-half foreground (jumping). ``-inf`` therefore belongs first for a
+    # jumping challenge instead of being silently discarded.
+    reverse = target == "sliding"
+    ranked = sorted(range(len(scores)), key=lambda index: scores[index], reverse=reverse)
+    print(f"?? Analyzing Anti-Bot card poses for: {target}...")
     for idx, score in enumerate(scores):
         print(f"  Card {idx + 1}: slide score {score:.2f}")
-    return [int(index) for index in ranked[:2]]
+    print("  Candidate order: " + ", ".join(str(index + 1) for index in ranked))
+    return [int(index) for index in ranked]
+
+
+def detect_anti_bot_odd_cards(screen):
+    """Backward-compatible helper returning the two most sliding-like cards."""
+    return detect_anti_bot_card_candidates(screen, "sliding")[:2]
