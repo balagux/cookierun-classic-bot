@@ -3,10 +3,20 @@
 โปรแกรมช่วยจัดการรอบ CookieRun Classic บน Windows ผ่าน ADB และ OpenCV โดยเน้นเมนูที่จำเป็น:
 เชื่อมต่อเกม เลือกซื้อไอเทม และสั่ง START/STOP บอทจากหน้าต่างขนาดกะทัดรัด
 
-> เวอร์ชันปัจจุบัน: **1.4.16**
+> เวอร์ชันปัจจุบัน: **1.4.17**
 >
 > โปรแกรมนี้เป็นโครงการทดลองด้าน Automation และ Computer Vision การใช้งานกับบัญชีจริง
 > อาจขัดกับข้อกำหนดของเกม ผู้ใช้ต้องรับผิดชอบความเสี่ยงด้วยตนเอง
+
+## Release 1.4.17
+
+- Redesigned the desktop UI as a CookieRun-inspired game-themed modern command center.
+- Added bundled game artwork for navigation, action cards, Mystery Box stats, Friends and Mailbox controls.
+- Replaced the main mascot and now use the same artwork for the window/taskbar icon, EXE icon, installer icon and shortcuts.
+- Fixed sprite buttons overflowing their cards: buttons now resize with their containers, including Quick Actions, Run Control and Telegram actions.
+- Updated PyInstaller packaging so `ui_assets` are bundled and source/packaged builds share the same visuals.
+- Core bot logic and the Anti-Bot solver remain based on v1.4.16.
+- Regression suite: **168 passed + 12 subtests**.
 
 ## รุ่น 1.4.16
 

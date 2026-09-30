@@ -185,3 +185,10 @@ telegram_settings.json
 
 # Local Qnector workspace memory
 .qnector/
+
+# Local extracted CookieRun source assets and UI review captures
+game_assets_original/
+ui_*preview*.png
+ui_*live*.png
+ui_fullpass_*.png
+game_asset_buttons_sheet.jpg

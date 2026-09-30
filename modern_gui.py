@@ -1,24 +1,36 @@
+import sys
 import threading
 import tkinter as tk
+from pathlib import Path
 
 import customtkinter as ctk
-from PIL import Image, ImageDraw, ImageTk
+from PIL import Image, ImageDraw, ImageEnhance, ImageOps, ImageTk
 
 from bot import BOOST_CHOICES
 from gui import CookieRunBotGUI
 import notifier
 
 
-BG = "#F4F5FA"
-CARD = "#FFFFFF"
-SIDEBAR = "#15172A"
-SIDEBAR_CARD = "#20233A"
-TEXT = "#242638"
-MUTED = "#858A9E"
-PURPLE = "#6C5CE7"
-PURPLE_HOVER = "#7A6BED"
-PURPLE_SOFT = "#F0EDFF"
-BORDER = "#E9EAF1"
+# Warm game-themed palette: cookie dough, chocolate, caramel and candy accents.
+BG = "#FFF7E9"
+CARD = "#FFFCF6"
+SIDEBAR = "#2E211B"
+SIDEBAR_CARD = "#463128"
+TEXT = "#3B2A22"
+MUTED = "#8F7768"
+PURPLE = "#F19A37"
+PURPLE_HOVER = "#FFAD52"
+PURPLE_SOFT = "#FFF0D2"
+BORDER = "#E9D7C4"
+MINT = "#45B889"
+MINT_HOVER = "#56C79A"
+BERRY = "#E66F8D"
+BERRY_HOVER = "#F27F9D"
+SKY = "#5AA6D8"
+GOLD = "#F6C65B"
+NAV_ACTIVE = "#5A3D2F"
+NAV_HOVER = "#4B342A"
+SIDEBAR_TEXT = "#E9D9CF"
 
 
 class BoostOptionMenu(ctk.CTkOptionMenu):
@@ -37,6 +49,135 @@ class BoostOptionMenu(ctk.CTkOptionMenu):
         if self._boost_values:
             safe_index = max(0, min(int(index), len(self._boost_values) - 1))
             self.set(self._boost_values[safe_index])
+
+
+class GameSpriteButton(tk.Canvas):
+    """Button rendered from CookieRun artwork and resized with its container."""
+
+    def __init__(
+        self, master, source_image, text, command, width, height, *,
+        canvas_bg, text_color="#FFFFFF", font=("Segoe UI", 10, "bold"),
+        state="normal", icon_image=None, icon_size=(14, 14),
+    ):
+        self._command = command
+        self._button_state = state
+        self._button_text = text
+        self._text_color = text_color
+        self._button_width = int(width)
+        self._button_height = int(height)
+        self._source_image = source_image.convert("RGBA")
+        self._icon_source_image = icon_image.convert("RGBA") if icon_image is not None else None
+        self._icon_size = tuple(icon_size)
+        self._font_spec = font
+        self._hovered = False
+        self._rendered_size = None
+        super().__init__(
+            master, width=self._button_width, height=self._button_height,
+            highlightthickness=0, bd=0, relief="flat", bg=canvas_bg,
+        )
+
+        self._button_photos = {}
+        self._icon_photos = None
+        self._image_item = self.create_image(0, 0, anchor="center")
+        self._icon_item = self.create_image(0, 0, anchor="center") if self._icon_source_image is not None else None
+        self._text_item = self.create_text(
+            0, 0, text=text, fill=text_color, font=font, anchor="center",
+        )
+        self.bind("<Configure>", self._on_resize)
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        self.bind("<Button-1>", self._on_click)
+        self._rebuild_photos(self._button_width, self._button_height)
+        self._render_button_state()
+
+    def _rebuild_photos(self, width, height):
+        width = max(24, int(width))
+        height = max(18, int(height))
+        size = (width, height)
+        if self._rendered_size == size:
+            return
+        self._rendered_size = size
+
+        base = self._source_image.resize(size, Image.Resampling.LANCZOS)
+        self._button_photos = {
+            "normal": ImageTk.PhotoImage(base),
+            "hover": ImageTk.PhotoImage(ImageEnhance.Brightness(base).enhance(1.08)),
+            "disabled": ImageTk.PhotoImage(ImageEnhance.Brightness(base).enhance(0.60)),
+        }
+        self.coords(self._image_item, width // 2, height // 2)
+
+        text_x = width // 2
+        if self._icon_item is not None and self._icon_source_image is not None:
+            # Shrink the icon slightly on narrow buttons so icon + label never clips.
+            max_icon_w = max(10, min(self._icon_size[0], round(width * 0.14)))
+            ratio = max_icon_w / max(1, self._icon_size[0])
+            icon_size = (
+                max_icon_w,
+                max(10, min(self._icon_size[1], round(self._icon_size[1] * ratio))),
+            )
+            icon_base = self._icon_source_image.resize(icon_size, Image.Resampling.LANCZOS)
+            self._icon_photos = {
+                "normal": ImageTk.PhotoImage(icon_base),
+                "hover": ImageTk.PhotoImage(ImageEnhance.Brightness(icon_base).enhance(1.08)),
+                "disabled": ImageTk.PhotoImage(ImageEnhance.Brightness(icon_base).enhance(0.55)),
+            }
+            if width >= 150:
+                icon_x = round(width * 0.24)
+                text_x = round(width * 0.59)
+            elif width >= 105:
+                icon_x = round(width * 0.22)
+                text_x = round(width * 0.59)
+            else:
+                icon_x = max(12, round(width * 0.18))
+                text_x = round(width * 0.60)
+            self.coords(self._icon_item, icon_x, height // 2 - 1)
+        self.coords(self._text_item, text_x, height // 2 - 1)
+        self._render_button_state()
+
+    def _on_resize(self, event):
+        self._rebuild_photos(event.width, event.height)
+
+    def _render_button_state(self, hover=None):
+        if hover is not None:
+            self._hovered = bool(hover)
+        disabled = self._button_state == "disabled"
+        key = "disabled" if disabled else ("hover" if self._hovered else "normal")
+        if self._button_photos:
+            self.itemconfigure(self._image_item, image=self._button_photos[key])
+        if self._icon_item is not None and self._icon_photos is not None:
+            self.itemconfigure(self._icon_item, image=self._icon_photos[key])
+        self.itemconfigure(
+            self._text_item, text=self._button_text,
+            fill="#D7D0CA" if disabled else self._text_color,
+        )
+        tk.Canvas.configure(self, cursor="arrow" if disabled else "hand2")
+
+    def _on_enter(self, _event=None):
+        if self._button_state != "disabled":
+            self._render_button_state(hover=True)
+
+    def _on_leave(self, _event=None):
+        self._render_button_state(hover=False)
+
+    def _on_click(self, _event=None):
+        if self._button_state != "disabled" and callable(self._command):
+            self._command()
+
+    def configure(self, cnf=None, **kwargs):
+        if cnf:
+            kwargs.update(cnf)
+        if "state" in kwargs:
+            self._button_state = kwargs.pop("state")
+        if "text" in kwargs:
+            self._button_text = kwargs.pop("text")
+        if "command" in kwargs:
+            self._command = kwargs.pop("command")
+        if kwargs:
+            tk.Canvas.configure(self, **kwargs)
+        if hasattr(self, "_image_item"):
+            self._render_button_state()
+
+    config = configure
 
 
 class ModernCookieRunBotGUI(CookieRunBotGUI):
@@ -203,10 +344,117 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
                  (p(55), p(20)), (p(53), p(34))),
                 fill=color,
             )
+        elif name == "mail":
+            draw.rounded_rectangle((p(8), p(15), p(56), p(49)), radius=p(7), outline=color, width=width)
+            draw.line((p(11), p(19), p(32), p(35), p(53), p(19)), fill=color, width=width)
+        elif name == "home":
+            draw.polygon(((p(8), p(30)), (p(32), p(9)), (p(56), p(30))), fill=color)
+            draw.rounded_rectangle((p(14), p(28), p(50), p(55)), radius=p(5), fill=color)
+            draw.rounded_rectangle((p(27), p(37), p(38), p(55)), radius=p(3), fill="#2E211B")
+        elif name == "trophy":
+            draw.rounded_rectangle((p(20), p(10), p(44), p(35)), radius=p(6), fill=color)
+            draw.arc((p(7), p(12), p(28), p(37)), 80, 280, fill=color, width=width)
+            draw.arc((p(36), p(12), p(57), p(37)), -100, 100, fill=color, width=width)
+            draw.rectangle((p(29), p(34), p(35), p(47)), fill=color)
+            draw.rounded_rectangle((p(19), p(45), p(45), p(55)), radius=p(4), fill=color)
+        elif name == "group":
+            draw.ellipse((p(9), p(12), p(28), p(31)), fill=color)
+            draw.ellipse((p(36), p(12), p(55), p(31)), fill=color)
+            draw.ellipse((p(23), p(7), p(42), p(26)), fill=color)
+            draw.rounded_rectangle((p(6), p(34), p(30), p(53)), radius=p(9), fill=color)
+            draw.rounded_rectangle((p(34), p(34), p(58), p(53)), radius=p(9), fill=color)
+            draw.rounded_rectangle((p(18), p(28), p(47), p(56)), radius=p(11), fill=color)
+        elif name == "gear":
+            draw.ellipse((p(13), p(13), p(51), p(51)), outline=color, width=p(7))
+            draw.ellipse((p(25), p(25), p(39), p(39)), fill=color)
+            for x1, y1, x2, y2 in ((28, 4, 36, 16), (28, 48, 36, 60), (4, 28, 16, 36), (48, 28, 60, 36)):
+                draw.rounded_rectangle((p(x1), p(y1), p(x2), p(y2)), radius=p(2), fill=color)
+        elif name == "scroll":
+            draw.rounded_rectangle((p(13), p(8), p(51), p(56)), radius=p(7), outline=color, width=width)
+            for y in (22, 32, 42):
+                draw.line((p(21), p(y), p(43), p(y)), fill=color, width=max(2, width - 1))
+        elif name == "shield":
+            draw.polygon(((p(32), p(6)), (p(53), p(15)), (p(49), p(42)), (p(32), p(58)), (p(15), p(42)), (p(11), p(15))), fill=color)
+            draw.line((p(22), p(31), p(29), p(39), p(43), p(23)), fill="#FFFFFF", width=max(3, width - 1))
+        elif name == "gift":
+            draw.rounded_rectangle((p(9), p(25), p(55), p(55)), radius=p(5), fill=color)
+            draw.rectangle((p(7), p(18), p(57), p(29)), fill=color)
+            draw.rectangle((p(29), p(18), p(35), p(55)), fill="#FFF7E9")
+            draw.arc((p(15), p(5), p(34), p(24)), 185, 355, fill=color, width=width)
+            draw.arc((p(30), p(5), p(49), p(24)), 185, 355, fill=color, width=width)
         return image
+
+    @staticmethod
+    def _resource_root():
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            return Path(sys._MEIPASS)
+        return Path(__file__).resolve().parent
+
+    @staticmethod
+    def _trim_transparent(image, padding=2):
+        """Crop uneven transparent sprite margins so optical icon sizes stay consistent."""
+        image = image.convert("RGBA")
+        alpha = image.getchannel("A")
+        bbox = alpha.getbbox()
+        if bbox is None:
+            return image
+        cropped = image.crop(bbox)
+        if padding > 0:
+            cropped = ImageOps.expand(cropped, border=int(padding), fill=(0, 0, 0, 0))
+        return cropped
+
+    @staticmethod
+    def _fit_icon_source(image, box_size, padding=0):
+        """Fit an RGBA icon into a box without distorting its aspect ratio."""
+        if isinstance(box_size, int):
+            box_size = (box_size, box_size)
+        box_w, box_h = map(int, box_size)
+        box_w = max(1, box_w)
+        box_h = max(1, box_h)
+        source = ModernCookieRunBotGUI._trim_transparent(image, padding=0)
+        max_w = max(1, box_w - padding * 2)
+        max_h = max(1, box_h - padding * 2)
+        source.thumbnail((max_w, max_h), Image.Resampling.LANCZOS)
+        canvas = Image.new("RGBA", (box_w, box_h), (0, 0, 0, 0))
+        x = (box_w - source.width) // 2
+        y = (box_h - source.height) // 2
+        canvas.alpha_composite(source, (x, y))
+        return canvas
+
+    @staticmethod
+    def _nav_badge_source(image, size=24):
+        """Put mixed game/generic icons on one consistent sidebar medallion."""
+        size = int(size)
+        badge = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(badge)
+        draw.ellipse((1, 1, size - 2, size - 2), fill="#5B3A2C", outline="#C78A4E", width=1)
+        fitted = ModernCookieRunBotGUI._fit_icon_source(image, (size - 8, size - 8))
+        badge.alpha_composite(fitted, ((size - fitted.width) // 2, (size - fitted.height) // 2))
+        return badge
+
+    def _icon_source(self, key, fallback_shape=None, fallback_color="#FFFFFF"):
+        source = getattr(self, "icon_sources", {}).get(key)
+        if source is not None:
+            return source.copy()
+        return self._draw_icon(fallback_shape or key, fallback_color, 64)
+
+    @staticmethod
+    def _fallback_button_sprite(color, width=220, height=68):
+        image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        draw.rounded_rectangle((3, 4, width - 3, height - 2), radius=height // 2, fill="#5B3828")
+        draw.rounded_rectangle((3, 1, width - 3, height - 7), radius=height // 2, fill=color, outline="#FFFFFF", width=2)
+        return image
+
+    def _game_sprite(self, key, fallback_color="#65B94F"):
+        sprite = getattr(self, "game_sprites", {}).get(key)
+        if sprite is not None:
+            return sprite
+        return self._fallback_button_sprite(fallback_color)
 
     def _create_app_icon(self):
         self.icons = {}
+        self.icon_sources = {}
         icon_specs = {
             "cookie": ("cookie", "#FFFFFF", 30),
             "play": ("play", "#FFFFFF", 18),
@@ -222,7 +470,24 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             "tap": ("tap", "#2E9F78", 16),
             "calendar": ("calendar", "#7B8197", 15),
             "heart": ("heart", "#FFFFFF", 17),
-            "box_wood": ("box", "#916640", 17),
+            "mail": ("mail", "#FFFFFF", 17),
+            "heart_big": ("heart", "#FFFFFF", 27),
+            "mail_big": ("mail", "#FFFFFF", 27),
+            "play_big": ("play", "#FFFFFF", 24),
+            "relay": ("refresh", "#E79631", 18),
+            "boost": ("gift", "#E79631", 18),
+            "relic": ("box", "#9B6A42", 18),
+            "stats": ("activity", "#4EA4C8", 18),
+            "health": ("shield", "#45B889", 18),
+            "logs": ("scroll", "#7B8197", 18),
+            "nav_home": ("home", "#F5D8B9", 16),
+            "nav_stats": ("trophy", "#F5D8B9", 15),
+            "nav_friends": ("group", "#F5D8B9", 15),
+            "nav_settings": ("gear", "#F5D8B9", 15),
+            "nav_logs": ("scroll", "#F5D8B9", 16),
+            "shield": ("shield", "#FFFFFF", 18),
+            "gift": ("gift", "#FFFFFF", 19),
+            "box_wood": ("box", "#916640", 22),
             "box_silver": ("box", "#667A91", 17),
             "box_gold": ("box", "#C1880C", 17),
             "box_rainbow": ("box", "#8A56C7", 17),
@@ -230,11 +495,112 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         }
         for key, (shape, color, display_size) in icon_specs.items():
             source = self._draw_icon(shape, color)
-            self.icons[key] = ctk.CTkImage(light_image=source, dark_image=source, size=(display_size, display_size))
+            self.icon_sources[key] = source.copy()
+            fitted = self._fit_icon_source(source, (display_size, display_size))
+            self.icons[key] = ctk.CTkImage(light_image=fitted, dark_image=fitted, size=(display_size, display_size))
 
-        app_source = Image.new("RGBA", (64, 64), PURPLE)
-        cookie = self._draw_icon("cookie", "#FFFFFF", 64)
-        app_source.alpha_composite(cookie)
+        # Real CookieRun artwork is copied into ui_assets so source runs and
+        # PyInstaller builds use the exact same visuals. Generated icons above
+        # remain as fallbacks if an asset is ever missing.
+        asset_dir = self._resource_root() / "ui_assets"
+        real_icon_specs = {
+            # Navigation: keep a tight 18-20px optical size so no item jumps out.
+            "nav_stats": ("bc_main_medal_icon.png", (17, 19)),
+            "nav_friends": ("crg_btn_icon_go_friends.png", (19, 18)),
+            "nav_settings": ("main_rank_settings.png", (18, 17)),
+
+            # Section headers / option helpers.
+            "plug": ("crg_friends_icon_refresh.png", (20, 20)),
+            "sparkle": ("reward_icon_boostset.png", (22, 22)),
+            "stats": ("bc_main_medal_icon.png", (20, 23)),
+            "tap": ("bc_main_ranking_mail.png", (22, 17)),
+            "relay": ("icon_tag_relay.png", (24, 25)),
+            "boost": ("reward_icon_boostset.png", (25, 25)),
+            "relic": ("reward_artifact_ep3.png", (25, 23)),
+
+            # Session / status tiles.
+            "check": ("bc_check.png", (24, 20)),
+            "clock": ("bc_main_time_icon.png", (20, 20)),
+            "calendar": ("bc_main_time_icon.png", (18, 18)),
+            "coin": ("reward_icon_coin_small.png", (28, 27)),
+            "xp": ("reward_icon_xp_small.png", (30, 26)),
+
+            # Friends / mailbox actions.
+            "heart": ("reward_icon_heart_small.png", (24, 20)),
+            "mail": ("bc_main_ranking_mail.png", (24, 18)),
+            "heart_big": ("reward_icon_heart_medium.png", (46, 38)),
+            "mail_big": ("crg_main_mailbox_cell_accept.png", (52, 33)),
+            "gift": ("btn_sendgift_icon.png", (28, 25)),
+
+            # Mystery Box variants: C=wood, B=silver, A=gold, S=special/rainbow.
+            "box_wood": ("myBox_c01.png", (54, 28)),
+            "box_silver": ("myBox_b01.png", (54, 28)),
+            "box_gold": ("myBox_a01.png", (54, 28)),
+            "box_rainbow": ("myBox_s01.png", (54, 29)),
+            "box_total": ("icon_mysterybox.png", (32, 28)),
+        }
+        for key, (filename, display_size) in real_icon_specs.items():
+            path = asset_dir / filename
+            try:
+                source = Image.open(path).convert("RGBA")
+                source = self._trim_transparent(source, padding=0)
+            except (OSError, ValueError):
+                continue
+            self.icon_sources[key] = source.copy()
+            fitted = self._fit_icon_source(source, display_size)
+            self.icons[key] = ctk.CTkImage(
+                light_image=fitted, dark_image=fitted, size=display_size
+            )
+
+        # Selected CookieBot mascot artwork for the brand, dashboard and window icon.
+        mascot_source = None
+        mascot_path = asset_dir / "cookiebot_mascot.png"
+        try:
+            mascot_source = Image.open(mascot_path).convert("RGBA")
+        except (OSError, ValueError):
+            mascot_source = None
+        if mascot_source is not None:
+            self.icon_sources["cookie"] = mascot_source.copy()
+            mascot_fitted = self._fit_icon_source(mascot_source, (40, 40))
+            self.icons["cookie"] = ctk.CTkImage(
+                light_image=mascot_fitted,
+                dark_image=mascot_fitted,
+                size=(40, 40),
+            )
+
+        # Sidebar icons come from different generations of the game art.
+        # Compose every one onto the same medallion so their visual weight,
+        # silhouette and baseline are consistent.
+        for nav_key in ("nav_home", "nav_stats", "nav_friends", "nav_settings", "nav_logs"):
+            source = self.icon_sources.get(nav_key)
+            if source is None:
+                continue
+            badge = self._nav_badge_source(source, 24)
+            self.icon_sources[nav_key] = badge.copy()
+            self.icons[nav_key] = ctk.CTkImage(light_image=badge, dark_image=badge, size=(24, 24))
+
+        self.game_sprites = {}
+        sprite_specs = {
+            "start": "bc_btn_green_big.png",
+            "stop": "bc_btn_red_long.png",
+            "send": "btn_green_midlong.png",
+            "mail": "bc_btn_orange_big.png",
+            "blue": "bc_btn_blue_mid.png",
+            "gray": "btn_gray_midlong.png",
+            "close": "popup_btn_close.png",
+            "mystery": "icon_mysterybox.png",
+        }
+        for key, filename in sprite_specs.items():
+            try:
+                self.game_sprites[key] = Image.open(asset_dir / filename).convert("RGBA")
+            except (OSError, ValueError):
+                continue
+
+        app_source = self.icon_sources.get("cookie")
+        if app_source is None:
+            app_source = Image.new("RGBA", (64, 64), PURPLE)
+            cookie = self._draw_icon("cookie", "#FFFFFF", 64)
+            app_source.alpha_composite(cookie)
         self.app_icon = ImageTk.PhotoImage(app_source.resize((32, 32), Image.Resampling.LANCZOS))
         self.root.iconphoto(True, self.app_icon)
 
@@ -248,9 +614,9 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         return ctk.CTkFont(family="Segoe UI", size=readable_size, weight=weight)
 
     def _section_header(self, parent, icon_key, title, subtitle):
-        header = ctk.CTkFrame(parent, fg_color="transparent", height=46)
-        header.pack(fill="x", padx=16, pady=(13, 8))
-        icon_box = ctk.CTkFrame(header, width=38, height=38, corner_radius=11, fg_color=PURPLE_SOFT)
+        header = ctk.CTkFrame(parent, fg_color="transparent", height=44)
+        header.pack(fill="x", padx=16, pady=(12, 8))
+        icon_box = ctk.CTkFrame(header, width=34, height=34, corner_radius=10, fg_color=PURPLE_SOFT)
         icon_box.pack(side="left")
         icon_box.pack_propagate(False)
         ctk.CTkLabel(icon_box, text="", image=self.icons[icon_key]).place(relx=0.5, rely=0.5, anchor="center")
@@ -259,6 +625,34 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         ctk.CTkLabel(copy, text=title, text_color=TEXT, font=self._font(14, "bold"), anchor="w").pack(anchor="w")
         ctk.CTkLabel(copy, text=subtitle, text_color=MUTED, font=self._font(10), anchor="w").pack(anchor="w")
         return header
+
+    def _option_control(self, parent, icon_key, text, variable, switch_args, command=None):
+        """Build one full-width option row with fixed icon, label and switch columns."""
+        frame = ctk.CTkFrame(parent, height=38, fg_color="transparent")
+        frame.grid_columnconfigure(1, weight=1)
+        frame.grid_propagate(False)
+
+        icon_box = ctk.CTkFrame(
+            frame, width=30, height=30, corner_radius=9,
+            fg_color="#F7E2BD", border_width=1, border_color="#E2BF8C",
+        )
+        icon_box.grid(row=0, column=0, padx=(4, 9), pady=4)
+        icon_box.grid_propagate(False)
+        ctk.CTkLabel(icon_box, text="", image=self.icons[icon_key]).place(
+            relx=0.5, rely=0.5, anchor="center"
+        )
+        ctk.CTkLabel(
+            frame, text=text, text_color=TEXT, font=self._font(10), anchor="w"
+        ).grid(row=0, column=1, sticky="w", padx=(0, 8))
+
+        args = dict(switch_args)
+        args.pop("text_color", None)
+        args.pop("font", None)
+        switch = ctk.CTkSwitch(
+            frame, text="", variable=variable, command=command, **args
+        )
+        switch.grid(row=0, column=2, sticky="e", padx=(8, 6))
+        return frame, switch
 
     def _card(self, parent, row, pady=(0, 10)):
         card = ctk.CTkFrame(
@@ -270,6 +664,79 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         )
         card.grid(row=row, column=0, sticky="nsew", pady=pady)
         return card
+
+    def _game_action_card(
+        self, parent, column, title, subtitle, icon_key, accent, shadow,
+        command, button_text, button_sprite,
+    ):
+        """Game-menu action card with centered artwork and native button art."""
+        shell = ctk.CTkFrame(parent, height=164, corner_radius=18, fg_color=shadow)
+        shell.grid(
+            row=1, column=column, sticky="nsew",
+            padx=(12, 5) if column == 0 else (5, 12), pady=(0, 13),
+        )
+        shell.grid_propagate(False)
+        card = ctk.CTkFrame(
+            shell, corner_radius=17, fg_color=CARD, border_width=2, border_color=accent
+        )
+        card.place(relx=0, rely=0, relwidth=1, relheight=0.965)
+
+        art_stage = ctk.CTkFrame(card, height=50, fg_color="transparent")
+        art_stage.pack(fill="x", padx=10, pady=(8, 0))
+        art_stage.pack_propagate(False)
+        ctk.CTkLabel(art_stage, text="", image=self.icons[icon_key]).place(
+            relx=0.5, rely=0.5, anchor="center"
+        )
+        ctk.CTkLabel(
+            card, text=title, text_color=TEXT, font=self._font(10, "bold"), anchor="center"
+        ).pack(fill="x", padx=10)
+        ctk.CTkLabel(
+            card, text=subtitle, text_color=MUTED, font=self._font(8), anchor="center"
+        ).pack(fill="x", padx=10, pady=(0, 4))
+
+        small_icon_key = "heart" if icon_key == "heart_big" else "mail"
+        button = GameSpriteButton(
+            card, self._game_sprite(button_sprite, accent), button_text, command,
+            width=174, height=34, canvas_bg=CARD,
+            font=("Segoe UI", 9, "bold"),
+            icon_image=self._icon_source(small_icon_key), icon_size=(16, 14),
+        )
+        button.pack(fill="x", padx=12, pady=(0, 9))
+        return button
+
+    def _loot_tile(self, parent, position, icon_key, title, value_var, detail_var, accent, columns):
+        """Inventory-like reward tile used by the Mystery Box screen."""
+        row, column = divmod(position, columns)
+        columnspan = 1
+        if title.upper() == "TOTAL LOOT" and columns > 1:
+            column = 0
+            columnspan = columns
+        reaches_last_column = column + columnspan >= columns
+        shadow = ctk.CTkFrame(parent, height=104, corner_radius=16, fg_color=accent[2])
+        shadow.grid(
+            row=row,
+            column=column,
+            columnspan=columnspan,
+            sticky="nsew",
+            padx=(0 if column == 0 else 5, 0 if reaches_last_column else 5),
+            pady=(0 if row == 0 else 5, 5),
+        )
+        shadow.grid_propagate(False)
+        tile = ctk.CTkFrame(shadow, corner_radius=15, fg_color=accent[0], border_width=2, border_color=accent[1])
+        tile.place(relx=0, rely=0, relwidth=1, relheight=0.94)
+        icon_stage = ctk.CTkFrame(
+            tile, width=66, height=46, corner_radius=12,
+            fg_color="#FFF9EF", border_width=1, border_color=accent[1],
+        )
+        icon_stage.pack(side="left", padx=(10, 8), pady=13)
+        icon_stage.pack_propagate(False)
+        ctk.CTkLabel(icon_stage, text="", image=self.icons[icon_key]).place(relx=0.5, rely=0.5, anchor="center")
+        copy = ctk.CTkFrame(tile, fg_color="transparent")
+        copy.pack(side="left", fill="both", expand=True, pady=10)
+        ctk.CTkLabel(copy, text=title.upper(), text_color=accent[2], font=self._font(8, "bold"), anchor="w").pack(anchor="w")
+        ctk.CTkLabel(copy, textvariable=value_var, text_color=TEXT, font=self._font(18, "bold"), anchor="w").pack(anchor="w")
+        ctk.CTkLabel(copy, textvariable=detail_var, text_color=MUTED, font=self._font(8), anchor="w").pack(anchor="w")
+        return tile
 
     def _build_ui(self):
         self.root.grid_columnconfigure(1, weight=1)
@@ -304,25 +771,25 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             width=brand_icon_size,
             height=brand_icon_size,
             corner_radius=14 if self.compact_layout else 16,
-            fg_color=PURPLE,
+            fg_color="transparent",
         )
         cookie_box.pack(side="left")
         cookie_box.pack_propagate(False)
         ctk.CTkLabel(cookie_box, text="", image=self.icons["cookie"]).place(relx=0.5, rely=0.5, anchor="center")
         brand_copy = ctk.CTkFrame(brand, fg_color="transparent")
         brand_copy.pack(side="left", padx=(9 if self.compact_layout else 12, 0))
-        ctk.CTkLabel(brand_copy, text="COOKIEBOT", text_color="#FFFFFF", font=self._font(16, "bold")).pack(anchor="w")
+        ctk.CTkLabel(brand_copy, text="COOKIEBOT", text_color="#FFF7E9", font=self._font(16, "bold")).pack(anchor="w")
         ctk.CTkLabel(
             brand_copy,
-            text="AUTOMATION" if self.compact_layout else "CLASSIC AUTOMATION",
-            text_color="#747992",
+            text="GAME COMMAND" if self.compact_layout else "GAME COMMAND CENTER",
+            text_color="#B79D8E",
             font=self._font(9, "bold"),
         ).pack(anchor="w")
 
         nav_title = ctk.CTkLabel(
             sidebar,
             text="QUICK JUMP",
-            text_color="#666B86",
+            text_color="#A98C7B",
             font=self._font(9, "bold"),
             anchor="w",
         )
@@ -333,43 +800,33 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         self._nav_indicators = {}
 
         nav_items = [
-            ("dashboard", "⌂", "Dashboard"),
-            ("statistics", "▦", "Statistics"),
-            ("friends", "♥", "Friends"),
-            ("settings", "⚡", "Settings"),
-            ("logs", "≡", "Activity Logs"),
+            ("dashboard", "nav_home", "Dashboard"),
+            ("statistics", "nav_stats", "Loot & Stats"),
+            ("friends", "nav_friends", "Friends"),
+            ("settings", "nav_settings", "Settings"),
+            ("logs", "nav_logs", "Activity Logs"),
         ]
         nav_row = 2
         for key, icon, label in nav_items:
-            item_row = ctk.CTkFrame(sidebar, fg_color="transparent", height=34)
-            item_row.grid(row=nav_row, column=0, sticky="ew", padx=10, pady=1)
-            item_row.grid_columnconfigure(1, weight=1)
-            item_row.grid_propagate(False)
-
-            indicator = ctk.CTkFrame(
-                item_row,
-                width=3,
-                corner_radius=2,
-                fg_color=PURPLE if key == "dashboard" else "transparent",
-            )
-            indicator.grid(row=0, column=0, sticky="ns", padx=(0, 5), pady=6)
-            indicator.grid_propagate(False)
-
+            # Avoid nested fixed-size wrappers here: under Windows scaling they
+            # can collapse the button column and leave only the indicator visible.
             button = ctk.CTkButton(
-                item_row,
-                height=32,
-                corner_radius=9,
-                text=f"  {icon}   {label}",
+                sidebar,
+                height=34,
+                corner_radius=10,
+                text=f" {label}",
+                image=self.icons[icon],
+                compound="left",
                 anchor="w",
-                fg_color=PURPLE_SOFT if key == "dashboard" else "transparent",
-                hover_color="#292C47",
-                text_color="#FFFFFF" if key == "dashboard" else "#A9ADC1",
+                fg_color=NAV_ACTIVE if key == "dashboard" else "transparent",
+                hover_color=NAV_HOVER,
+                text_color="#FFF3D5" if key == "dashboard" else SIDEBAR_TEXT,
                 font=self._font(9, "bold"),
                 command=lambda page=key: self._navigate(page),
             )
-            button.grid(row=0, column=1, sticky="ew")
+            button.grid(row=nav_row, column=0, sticky="ew", padx=12, pady=1)
             self.nav_buttons[key] = button
-            self._nav_indicators[key] = indicator
+            self._nav_indicators[key] = None
             nav_row += 1
 
         run_panel = ctk.CTkFrame(sidebar, corner_radius=16, fg_color=SIDEBAR_CARD)
@@ -380,54 +837,42 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             padx=12 if self.compact_layout else 15,
             pady=(6, 0),
         )
-        ctk.CTkLabel(run_panel, text="RUN CONTROL", text_color="#858AA2", font=self._font(10, "bold"), anchor="w").pack(
-            fill="x", padx=14, pady=(14, 9)
+        ctk.CTkLabel(run_panel, text="▶ RUN CONTROL", text_color=GOLD, font=self._font(10, "bold"), anchor="w").pack(
+            fill="x", padx=14, pady=(10, 6)
         )
-        self.start_button = ctk.CTkButton(
-            run_panel,
-            height=45,
-            corner_radius=12,
-            text="START BOT",
-            image=self.icons["play"],
-            fg_color=PURPLE,
-            hover_color=PURPLE_HOVER,
-            font=self._font(12, "bold"),
-            command=self._start_bot,
+        self.start_button = GameSpriteButton(
+            run_panel, self._game_sprite("start", "#69BE4B"), "START BOT",
+            self._start_bot, width=132, height=42, canvas_bg=SIDEBAR_CARD,
+            font=("Segoe UI", 10, "bold"),
+            icon_image=self._draw_icon("play", "#FFFFFF", 64), icon_size=(16, 16),
         )
-        self.start_button.pack(fill="x", padx=12)
-        self.stop_button = ctk.CTkButton(
-            run_panel,
-            height=39,
-            corner_radius=11,
-            text="STOP",
-            image=self.icons["stop"],
-            fg_color="#292C47",
-            hover_color="#343852",
-            text_color="#FF91A9",
-            font=self._font(11, "bold"),
-            command=self._stop_bot,
-            state="disabled",
+        self.start_button.pack(fill="x", padx=12, pady=(0, 2))
+        self.stop_button = GameSpriteButton(
+            run_panel, self._game_sprite("stop", "#DD5540"), "STOP",
+            self._stop_bot, width=132, height=34, canvas_bg=SIDEBAR_CARD,
+            font=("Segoe UI", 9, "bold"), state="disabled",
+            icon_image=self._draw_icon("stop", "#FFFFFF", 64), icon_size=(16, 16),
         )
-        self.stop_button.pack(fill="x", padx=12, pady=(7, 7))
-        # Friend-heart and mailbox actions live in the dedicated Friends section below.
+        self.stop_button.pack(fill="x", padx=12, pady=(2, 6))
+        # Friend-heart and mailbox actions are exposed as Quick Actions in the dashboard.
         repeat = ctk.CTkFrame(run_panel, fg_color="transparent")
         repeat.pack(fill="x", padx=13)
-        ctk.CTkLabel(repeat, text="จำนวนรอบ", text_color="#C1C4D3", font=self._font(10)).pack(side="left")
+        ctk.CTkLabel(repeat, text="จำนวนรอบ", text_color="#E8D6CB", font=self._font(10)).pack(side="left")
         self.max_runs_spinbox = ctk.CTkEntry(
             repeat,
             width=62,
-            height=34,
+            height=30,
             corner_radius=10,
             border_width=1,
-            border_color="#3B3F5C",
-            fg_color="#292C47",
+            border_color="#6A4B3D",
+            fg_color="#35251F",
             text_color="#FFFFFF",
             justify="center",
             textvariable=self.max_runs_var,
         )
         self.max_runs_spinbox.pack(side="right")
-        ctk.CTkLabel(run_panel, text="0 = เล่นไม่จำกัด", text_color="#737891", font=self._font(9), anchor="w").pack(
-            fill="x", padx=14, pady=(7, 14)
+        ctk.CTkLabel(run_panel, text="0 = เล่นไม่จำกัด", text_color="#A98C7B", font=self._font(9), anchor="w").pack(
+            fill="x", padx=14, pady=(4, 8)
         )
 
         workspace = ctk.CTkFrame(self.root, corner_radius=0, fg_color=BG)
@@ -435,12 +880,12 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         workspace.grid_columnconfigure(0, weight=1)
         workspace.grid_rowconfigure(1, weight=1)
 
-        topbar = ctk.CTkFrame(workspace, height=60, corner_radius=0, fg_color=CARD)
+        topbar = ctk.CTkFrame(workspace, height=60, corner_radius=0, fg_color="#FFF9F0")
         topbar.grid(row=0, column=0, sticky="ew")
         topbar.grid_propagate(False)
         title_copy = ctk.CTkFrame(topbar, fg_color="transparent")
         title_copy.pack(side="left", padx=18, pady=8)
-        ctk.CTkLabel(title_copy, text="CookieRun Bot", text_color=TEXT, font=self._font(17, "bold"), anchor="w").pack(anchor="w")
+        ctk.CTkLabel(title_copy, text="CookieRun Command Center", text_color=TEXT, font=self._font(17, "bold"), anchor="w").pack(anchor="w")
         ctk.CTkLabel(
             title_copy,
             textvariable=self.game_stage_var,
@@ -453,8 +898,8 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             textvariable=self.status_var,
             height=32,
             corner_radius=10,
-            fg_color="#EFF0F5",
-            text_color="#555A6E",
+            fg_color="#FFF0D2",
+            text_color="#80501D",
             font=self._font(10, "bold"),
             padx=13,
         )
@@ -465,11 +910,11 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             corner_radius=0,
             border_width=0,
             fg_color=BG,
-            segmented_button_fg_color="#E8EAF2",
-            segmented_button_selected_color="#DCD6FF",
-            segmented_button_selected_hover_color="#D2CBFF",
-            segmented_button_unselected_color="#E8EAF2",
-            segmented_button_unselected_hover_color="#DCDDEA",
+            segmented_button_fg_color="#F1E4D4",
+            segmented_button_selected_color="#FFD98F",
+            segmented_button_selected_hover_color="#FFE4AA",
+            segmented_button_unselected_color="#F1E4D4",
+            segmented_button_unselected_hover_color="#E9D4BF",
             segmented_button_font=self._font(10, "bold"),
             text_color=TEXT,
             anchor="w",
@@ -487,8 +932,8 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
                 corner_radius=0,
                 border_width=0,
                 fg_color=BG,
-                scrollbar_button_color="#D9DCE7",
-                scrollbar_button_hover_color="#C9CDD9",
+                scrollbar_button_color="#C9A982",
+                scrollbar_button_hover_color="#B88E62",
             )
             body.grid(row=0, column=0, sticky="nsew", padx=(12, 4), pady=(10, 7))
         else:
@@ -498,20 +943,43 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         overview_tab.grid_rowconfigure(0, weight=1)
         body.grid_columnconfigure(0, weight=1)
         if not self.compact_layout:
-            body.grid_rowconfigure(3, weight=1, minsize=150)
+            body.grid_rowconfigure(4, weight=1, minsize=150)
 
-        hero = ctk.CTkFrame(body, corner_radius=18, fg_color="#171A2E")
+        hero = ctk.CTkFrame(body, corner_radius=20, fg_color="#4A3126", border_width=2, border_color="#79533F")
         hero.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-        hero.grid_columnconfigure(0, weight=1)
+        hero.grid_columnconfigure(1, weight=1)
+        runner_badge = ctk.CTkFrame(hero, width=58, height=58, corner_radius=18, fg_color="transparent", border_width=0)
+        runner_badge.grid(row=0, column=0, padx=(16, 8), pady=14)
+        runner_badge.grid_propagate(False)
+        ctk.CTkLabel(runner_badge, text="", image=self.icons["cookie"]).place(relx=0.5, rely=0.5, anchor="center")
         hero_copy = ctk.CTkFrame(hero, fg_color="transparent")
-        hero_copy.grid(row=0, column=0, sticky="w", padx=20, pady=16)
-        ctk.CTkLabel(hero_copy, text="COOKIE RUN AUTOMATION", text_color="#8E94B2", font=self._font(9, "bold")).pack(anchor="w")
-        ctk.CTkLabel(hero_copy, textvariable=self.status_var, text_color="#FFFFFF", font=self._font(19, "bold")).pack(anchor="w", pady=(2, 1))
-        ctk.CTkLabel(hero_copy, textvariable=self.game_stage_var, text_color="#AEB3C9", font=self._font(10)).pack(anchor="w")
-        ctk.CTkLabel(hero, textvariable=self.session_elapsed_var, text_color="#FFFFFF", font=self._font(18, "bold")).grid(row=0, column=1, padx=20)
+        hero_copy.grid(row=0, column=1, sticky="w", padx=(2, 8), pady=13)
+        ctk.CTkLabel(hero_copy, text="★ RUNNER HQ", text_color=GOLD, font=self._font(9, "bold")).pack(anchor="w")
+        ctk.CTkLabel(hero_copy, textvariable=self.status_var, text_color="#FFF8E9", font=self._font(18, "bold")).pack(anchor="w", pady=(1, 1))
+        ctk.CTkLabel(hero_copy, textvariable=self.game_stage_var, text_color="#E2CFC3", font=self._font(9)).pack(anchor="w")
+        session_badge = ctk.CTkFrame(hero, corner_radius=14, fg_color="#36231C", border_width=2, border_color="#79533F")
+        session_badge.grid(row=0, column=2, padx=(5, 15), pady=14, sticky="e")
+        ctk.CTkLabel(session_badge, text="SESSION", text_color="#C9AA98", font=self._font(8, "bold")).pack(padx=12, pady=(7, 0))
+        ctk.CTkLabel(session_badge, textvariable=self.session_elapsed_var, text_color="#FFF3D5", font=self._font(15, "bold")).pack(padx=12, pady=(0, 7))
+
+        # High-frequency actions use full game-menu cards with icon medallions.
+        quick_actions = ctk.CTkFrame(body, corner_radius=18, fg_color="#FFF0D8", border_width=1, border_color="#F0D2A9")
+        quick_actions.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        quick_actions.grid_columnconfigure((0, 1), weight=1, uniform="quick_action")
+        ctk.CTkLabel(quick_actions, text="QUICK ACTIONS", text_color="#9C6B35", font=self._font(9, "bold"), anchor="w").grid(
+            row=0, column=0, columnspan=2, sticky="ew", padx=14, pady=(10, 6)
+        )
+        self.send_hearts_button = self._game_action_card(
+            quick_actions, 0, "ส่งหัวใจ", "Friends leaderboard", "heart_big",
+            MINT, "#287B60", self._send_hearts, "SEND HEARTS", "send"
+        )
+        self.mailbox_hearts_button = self._game_action_card(
+            quick_actions, 1, "Mailbox", "รับ / ส่งหัวใจ", "mail_big",
+            BERRY, "#A74963", self._send_mailbox_hearts, "OPEN MAILBOX", "mail"
+        )
 
         settings_row = ctk.CTkFrame(body, fg_color="transparent")
-        settings_row.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
+        settings_row.grid(row=2, column=0, sticky="nsew", pady=(0, 10))
         settings_row.grid_columnconfigure(0, weight=1, uniform="settings")
         if not self.layout["stack_settings"]:
             settings_row.grid_columnconfigure(1, weight=1, uniform="settings")
@@ -533,25 +1001,18 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         ip_label = ctk.CTkLabel(fields, text="IP / HOST", text_color=MUTED, font=self._font(9, "bold"))
         self.ip_entry = ctk.CTkEntry(
             fields, height=36, corner_radius=10, border_width=1, border_color=BORDER,
-            fg_color="#F8F8FC", text_color=TEXT, textvariable=self.ip_var,
+            fg_color="#FFF8EA", text_color=TEXT, textvariable=self.ip_var,
         )
         port_label = ctk.CTkLabel(fields, text="PORT", text_color=MUTED, font=self._font(9, "bold"))
         self.port_entry = ctk.CTkEntry(
             fields, width=82, height=36, corner_radius=10, border_width=1, border_color=BORDER,
-            fg_color="#F8F8FC", text_color=TEXT, textvariable=self.port_var,
+            fg_color="#FFF8EA", text_color=TEXT, textvariable=self.port_var,
         )
-        self.test_button = ctk.CTkButton(
-            fields,
-            width=130,
-            height=36,
-            corner_radius=10,
-            text="ทดสอบ ADB",
-            image=self.icons["refresh"],
-            fg_color="#F0F1F6",
-            hover_color="#E6E7EF",
-            text_color="#555A6E",
-            font=self._font(10, "bold"),
-            command=self._test_connection,
+        self.test_button = GameSpriteButton(
+            fields, self._game_sprite("blue", "#42AFC5"), "TEST ADB",
+            self._test_connection, width=126, height=36, canvas_bg=CARD,
+            font=("Segoe UI", 9, "bold"),
+            icon_image=self._draw_icon("refresh", "#FFFFFF", 64), icon_size=(15, 15),
         )
         if self.narrow_controls:
             ip_label.grid(row=0, column=0, sticky="w", padx=(0, 8), pady=(0, 7))
@@ -577,102 +1038,75 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             pady=(5, 0) if self.layout["stack_settings"] else 0,
         )
         self._section_header(options, "sparkle", "ตัวเลือกในแต่ละรอบ", "ซื้อเฉพาะรายการที่เปิดใช้งาน")
-        option_row = ctk.CTkFrame(options, fg_color="transparent")
+        option_row = ctk.CTkFrame(
+            options, corner_radius=14, fg_color="#FFF8EA",
+            border_width=1, border_color="#EED5B9",
+        )
         option_row.pack(fill="x", padx=16, pady=(0, 13))
-        option_row.grid_columnconfigure((0, 1, 2), weight=1)
+        option_row.grid_columnconfigure(0, weight=1)
         switch_args = dict(
             height=28,
             switch_width=40,
             switch_height=21,
-            progress_color=PURPLE,
-            button_color="#FFFFFF",
+            progress_color=MINT,
+            button_color="#FFFDF8",
             button_hover_color="#FFFFFF",
-            text_color="#464A5E",
+            border_color="#CBA57C",
+            text_color=TEXT,
             font=self._font(10),
         )
-        fast_start_switch = ctk.CTkSwitch(
-            option_row,
-            text="Fast Start",
-            variable=self.fast_start_var,
-            **switch_args,
+        fast_start_control, fast_start_switch = self._option_control(
+            option_row, "play", "Fast Start", self.fast_start_var, switch_args
         )
-        cookie_relay_switch = ctk.CTkSwitch(
-            option_row,
-            text="Cookie Relay",
-            variable=self.cookie_relay_var,
-            **switch_args,
+        cookie_relay_control, cookie_relay_switch = self._option_control(
+            option_row, "relay", "Cookie Relay", self.cookie_relay_var, switch_args
         )
-        relay_quick_exit_switch = ctk.CTkSwitch(
-            option_row,
-            text="ออกเร็วหลังไม้ 2 (ปิด = รอจนตาย)",
-            variable=self.relay_quick_exit_var,
-            **switch_args,
-        )
-        random_boost_switch = ctk.CTkSwitch(
-            option_row,
-            text="Random Boost",
-            variable=self.use_boost_var,
+        random_boost_control, random_boost_switch = self._option_control(
+            option_row, "boost", "Random Boost", self.use_boost_var, switch_args,
             command=self._toggle_boost,
-            **switch_args,
         )
-        relic_reward_switch = ctk.CTkSwitch(
-            option_row,
-            text="รับ Relic อัตโนมัติ (ปิด = ดองชิ้นส่วน)",
-            variable=self.claim_relic_rewards_var,
-            **switch_args,
+        relay_quick_exit_control, relay_quick_exit_switch = self._option_control(
+            option_row, "clock", "\u0e2d\u0e2d\u0e01\u0e40\u0e23\u0e47\u0e27\u0e2b\u0e25\u0e31\u0e07\u0e44\u0e21\u0e49 2 (\u0e1b\u0e34\u0e14 = \u0e23\u0e2d\u0e08\u0e19\u0e15\u0e32\u0e22)",
+            self.relay_quick_exit_var, switch_args,
+        )
+        relic_reward_control, relic_reward_switch = self._option_control(
+            option_row, "relic", "\u0e23\u0e31\u0e1a Relic \u0e2d\u0e31\u0e15\u0e42\u0e19\u0e21\u0e31\u0e15\u0e34 (\u0e1b\u0e34\u0e14 = \u0e14\u0e2d\u0e07\u0e0a\u0e34\u0e49\u0e19\u0e2a\u0e48\u0e27\u0e19)",
+            self.claim_relic_rewards_var, switch_args,
         )
         self.fast_start_switch = fast_start_switch
         self.cookie_relay_switch = cookie_relay_switch
         self.relay_quick_exit_switch = relay_quick_exit_switch
         self.random_boost_switch = random_boost_switch
         self.relic_reward_switch = relic_reward_switch
-        if self.narrow_controls:
-            fast_start_switch.grid(row=0, column=0, columnspan=3, sticky="w")
-            cookie_relay_switch.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
-            random_boost_switch.grid(row=3, column=0, columnspan=3, sticky="w", pady=(4, 0))
-        else:
-            fast_start_switch.grid(row=0, column=0, sticky="w", padx=(0, 8))
-            cookie_relay_switch.grid(row=0, column=1, sticky="w", padx=(0, 8))
-            random_boost_switch.grid(row=0, column=2, sticky="w")
-        relay_quick_exit_switch.grid(
-            row=self.layout["relay_quick_exit_row"],
-            column=0,
-            columnspan=3,
-            sticky="w",
-            pady=(6, 0),
-        )
-        relic_reward_switch.grid(
-            row=self.layout["relic_switch_row"],
-            column=0,
-            columnspan=3,
-            sticky="w",
-            pady=(6, 0),
-        )
+        fast_start_control.grid(row=0, column=0, sticky="ew", padx=4, pady=(3, 0))
+        cookie_relay_control.grid(row=1, column=0, sticky="ew", padx=4, pady=(1, 0))
+        random_boost_control.grid(row=2, column=0, sticky="ew", padx=4, pady=(1, 0))
+        relay_quick_exit_control.grid(row=3, column=0, sticky="ew", padx=4, pady=(1, 0))
+        relic_reward_control.grid(row=4, column=0, sticky="ew", padx=4, pady=(1, 2))
         self.boost_combo = BoostOptionMenu(
             option_row,
             height=36,
             corner_radius=10,
             values=[name for name, _ in BOOST_CHOICES],
-            fg_color="#F4F2FF",
-            button_color="#E8E4FF",
-            button_hover_color="#DED8FF",
-            text_color="#5649B7",
-            dropdown_fg_color="#FFFFFF",
-            dropdown_hover_color="#F0EDFF",
+            fg_color="#FFF1D5",
+            button_color="#F2B952",
+            button_hover_color="#FFC967",
+            text_color="#75432A",
+            dropdown_fg_color="#FFFBF3",
+            dropdown_hover_color="#FFE4B5",
             dropdown_text_color=TEXT,
             font=self._font(10),
             dropdown_font=self._font(10),
         )
         self.boost_combo.grid(
-            row=self.layout["boost_combo_row"],
+            row=5,
             column=0,
-            columnspan=3,
             sticky="ew",
             pady=(9, 0),
         )
         self.boost_combo.current(0)
 
-        statistics = self._card(body, 2)
+        statistics = self._card(body, 3)
         self._section_header(
             statistics,
             "activity",
@@ -733,20 +1167,15 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             columnspan=self.summary_columns,
         )
 
-        log_card = self._card(body, 3, pady=(0, 0))
-        log_header = self._section_header(log_card, "activity", "Live Activity", "ดูสถานะการทำงานแบบเรียลไทม์")
-        ctk.CTkButton(
-            log_header,
-            width=82,
-            height=30,
-            corner_radius=9,
-            text="ล้าง Log",
-            fg_color="#F1F2F6",
-            hover_color="#E7E8EF",
-            text_color="#64697D",
-            font=self._font(9, "bold"),
-            command=self._clear_log,
-        ).pack(side="right")
+        log_card = self._card(body, 4, pady=(0, 0))
+        log_header = self._section_header(log_card, "logs", "Live Activity", "ดูสถานะการทำงานแบบเรียลไทม์")
+        clear_log_button = GameSpriteButton(
+            log_header, self._game_sprite("gray", "#8C8C8C"), "CLEAR LOG",
+            self._clear_log, width=84, height=28, canvas_bg=CARD,
+            font=("Segoe UI", 8, "bold"),
+            icon_image=self._draw_icon("scroll", "#FFFFFF", 64), icon_size=(14, 14),
+        )
+        clear_log_button.pack(side="right")
         self.log = ctk.CTkTextbox(
             log_card,
             height=82,
@@ -763,8 +1192,8 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         self._append_log("READY  •  ตั้งค่าไอเทม แล้วทดสอบ ADB ก่อนเริ่ม\n")
         self._build_box_stats_tab(boxes_tab)
         self._build_notify_tab(notify_tab)
-        self._build_health_panel(body, row=4)
-        friends_card = self._build_friends_panel(body, row=5)
+        self._build_health_panel(body, row=5)
+        friends_card = self._build_friends_panel(body, row=6)
 
         # Sidebar items are views into the fixed 720x500 workspace. Extra
         # content stays inside the dashboard's own scrollbar.
@@ -780,35 +1209,57 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         if page == "statistics":
             self.workspace_tabs.set("สถิติกล่อง")
         else:
-            self.workspace_tabs.set("ภาพรวม")
             target = self._nav_targets.get(page)
-            if target is not None:
+            current_tab = self.workspace_tabs.get()
+            if current_tab != "ภาพรวม":
+                self.workspace_tabs.set("ภาพรวม")
+                if target is not None:
+                    # Switching tabs rebuilds canvas geometry; scroll after it settles.
+                    self.root.after(80, lambda target=target: self._scroll_to_widget(target))
+            elif target is not None:
+                # Do not call set("ภาพรวม") again here: CTkTabview resets the
+                # scroll position even when selecting the already-active tab.
                 self._scroll_to_widget(target)
 
         for key, button in self.nav_buttons.items():
             active = key == page
             button.configure(
-                fg_color=PURPLE_SOFT if active else "transparent",
-                text_color="#FFFFFF" if active else "#A9ADC1",
+                fg_color=NAV_ACTIVE if active else "transparent",
+                text_color="#FFF3D5" if active else SIDEBAR_TEXT,
             )
             indicator = self._nav_indicators.get(key)
             if indicator is not None:
-                indicator.configure(fg_color=PURPLE if active else "transparent")
+                indicator.configure(fg_color=GOLD if active else "transparent")
         if page == "logs":
             self.log.see("end")
 
     def _scroll_to_widget(self, widget):
-        """Scroll the dashboard body until the selected section is visible."""
+        """Scroll the dashboard body until the selected nested section is visible."""
         body = getattr(self, "_dashboard_body", None)
         if body is None or widget is None:
             return
         try:
             canvas = body._parent_canvas
-            canvas.update_idletasks()
-            content_height = max(1, body.winfo_reqheight())
-            target_y = max(0, widget.winfo_y() - 8)
-            canvas.yview_moveto(min(1.0, target_y / content_height))
-        except (AttributeError, tk.TclError, ZeroDivisionError):
+            self.root.update_idletasks()
+
+            target_y = 0
+            current = widget
+            while current is not None and current is not body:
+                target_y += max(0, int(current.winfo_y()))
+                current = getattr(current, "master", None)
+            if current is not body:
+                return
+
+            bbox = canvas.bbox("all")
+            content_height = max(
+                1,
+                (bbox[3] - bbox[1]) if bbox else body.winfo_reqheight(),
+            )
+            viewport_height = max(1, canvas.winfo_height())
+            max_offset = max(1, content_height - viewport_height)
+            target_offset = min(max_offset, max(0, target_y - 10))
+            canvas.yview_moveto(min(1.0, target_offset / content_height))
+        except (AttributeError, tk.TclError, ZeroDivisionError, TypeError):
             return
 
     def _build_health_panel(self, parent, row=4):
@@ -817,7 +1268,7 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         card.grid(row=row, column=0, sticky="ew", pady=(10, 10))
         self.health_vars = {}
         self.health_labels = {}
-        self._section_header(card, "activity", "Bot Health", "สถานะของส่วนสำคัญระหว่างทำงาน")
+        self._section_header(card, "health", "Bot Health", "สถานะของส่วนสำคัญระหว่างทำงาน")
         grid = ctk.CTkFrame(card, fg_color="transparent")
         grid.pack(fill="x", padx=16, pady=(0, 14))
         for column in range(4):
@@ -829,7 +1280,7 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             ("STATE", "สถานะเกม"),
         ]
         for column, (key, detail) in enumerate(items):
-            tile = ctk.CTkFrame(grid, corner_radius=12, fg_color="#F8F8FC")
+            tile = ctk.CTkFrame(grid, corner_radius=12, fg_color="#FFF8EA")
             tile.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 4, 0 if column == 3 else 4))
             state_var = ctk.StringVar(value="● WAIT")
             self.health_vars[key] = state_var
@@ -845,43 +1296,44 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         return card
 
     def _build_friends_panel(self, parent, row=5):
-        """Dedicated Friends section for the sidebar navigation."""
-        card = ctk.CTkFrame(parent, corner_radius=16, fg_color=CARD, border_width=1, border_color=BORDER)
+        """Dedicated Friends section using the same centered game-art language."""
+        card = ctk.CTkFrame(
+            parent, corner_radius=18, fg_color=CARD, border_width=1, border_color=BORDER
+        )
         card.grid(row=row, column=0, sticky="ew", pady=(0, 10))
-        self._section_header(card, "heart", "Friends", "ส่งหัวใจให้เพื่อนจากหน้า Friends leaderboard")
-        ctk.CTkLabel(
-            card,
-            text="เปิดหน้า Friends ในเกมก่อน แล้วกดปุ่มด้านล่างเพื่อเริ่มส่งหัวใจทีละคน",
-            text_color=MUTED,
-            font=self._font(9),
-            anchor="w",
-        ).pack(fill="x", padx=16, pady=(0, 10))
-        self.send_hearts_button = ctk.CTkButton(
-            card,
-            height=38,
-            corner_radius=10,
-            text="ส่งหัวใจให้เพื่อน",
-            image=self.icons["heart"],
-            fg_color="#2E9F78",
-            hover_color="#38AD85",
-            text_color="#FFFFFF",
-            font=self._font(10, "bold"),
-            command=self._send_hearts,
+        self._section_header(
+            card, "heart", "Friends Lounge",
+            "\u0e2b\u0e31\u0e27\u0e43\u0e08\u0e41\u0e25\u0e30\u0e01\u0e25\u0e48\u0e2d\u0e07\u0e08\u0e14\u0e2b\u0e21\u0e32\u0e22\u0e2d\u0e22\u0e39\u0e48\u0e43\u0e19 Quick Actions \u0e14\u0e49\u0e32\u0e19\u0e1a\u0e19",
         )
-        self.send_hearts_button.pack(fill="x", padx=16, pady=(0, 8))
-        self.mailbox_hearts_button = ctk.CTkButton(
-            card,
-            height=38,
-            corner_radius=10,
-            text="รับหัวใจจากกล่องจดหมาย",
-            image=self.icons["heart"],
-            fg_color="#3D6EA5",
-            hover_color="#4A7FBB",
-            text_color="#FFFFFF",
-            font=self._font(10, "bold"),
-            command=self._send_mailbox_hearts,
+        tips = ctk.CTkFrame(card, fg_color="transparent")
+        tips.pack(fill="x", padx=16, pady=(0, 14))
+        tips.grid_columnconfigure((0, 1), weight=1, uniform="friend_tip")
+        items = (
+            ("heart_big", "SEND HEARTS", "Friends leaderboard", MINT, "#EAF8F0"),
+            ("mail_big", "MAILBOX", "\u0e23\u0e31\u0e1a / \u0e2a\u0e48\u0e07\u0e2b\u0e31\u0e27\u0e43\u0e08", BERRY, "#FFF0F4"),
         )
-        self.mailbox_hearts_button.pack(fill="x", padx=16, pady=(0, 14))
+        for column, (icon_key, title, detail, color, background) in enumerate(items):
+            tile = ctk.CTkFrame(
+                tips, height=112, corner_radius=14, fg_color=background,
+                border_width=2, border_color=color,
+            )
+            tile.grid(
+                row=0, column=column, sticky="ew",
+                padx=(0, 5) if column == 0 else (5, 0),
+            )
+            tile.grid_propagate(False)
+            art = ctk.CTkFrame(tile, height=58, fg_color="transparent")
+            art.pack(fill="x", pady=(6, 0))
+            art.pack_propagate(False)
+            ctk.CTkLabel(art, text="", image=self.icons[icon_key]).place(
+                relx=0.5, rely=0.5, anchor="center"
+            )
+            ctk.CTkLabel(
+                tile, text=title, text_color=color, font=self._font(9, "bold")
+            ).pack()
+            ctk.CTkLabel(
+                tile, text=detail, text_color=MUTED, font=self._font(8)
+            ).pack(pady=(1, 7))
         return card
 
     def _set_health(self, key, state):
@@ -933,8 +1385,8 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             corner_radius=0,
             border_width=0,
             fg_color=BG,
-            scrollbar_button_color="#D9DCE7",
-            scrollbar_button_hover_color="#C9CDD9",
+            scrollbar_button_color="#C9A982",
+            scrollbar_button_hover_color="#B88E62",
         )
         body.grid(row=0, column=0, sticky="nsew", padx=(12, 4), pady=(8, 7))
         body.grid_columnconfigure(0, weight=1)
@@ -966,25 +1418,14 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             uniform="box_summary",
         )
         box_tiles = (
-            ("box_wood", "กล่องไม้", self.box_wood_total_var, self.box_wood_average_var, ("#F7EDE3", "#895D36")),
-            ("box_silver", "กล่องเงิน", self.box_silver_total_var, self.box_silver_average_var, ("#ECF2F7", "#60758B")),
-            ("box_gold", "กล่องทอง", self.box_gold_total_var, self.box_gold_average_var, ("#FFF3D2", "#A97305")),
-            ("box_rainbow", "กล่องรุ้ง", self.box_rainbow_total_var, self.box_rainbow_average_var, ("#F3EAFF", "#8650C3")),
-            ("box_total", "กล่องทั้งหมด", self.box_total_var, self.box_total_average_var, (PURPLE_SOFT, PURPLE)),
+            ("box_wood", "WOOD", self.box_wood_total_var, self.box_wood_average_var, ("#F4E4D3", "#9B6841", "#65422A")),
+            ("box_silver", "SILVER", self.box_silver_total_var, self.box_silver_average_var, ("#E9F0F5", "#71879B", "#536574")),
+            ("box_gold", "GOLD", self.box_gold_total_var, self.box_gold_average_var, ("#FFF0BD", "#D39A19", "#9A6B05")),
+            ("box_rainbow", "RAINBOW", self.box_rainbow_total_var, self.box_rainbow_average_var, ("#F2E4FF", "#9A66CE", "#68418D")),
+            ("box_total", "TOTAL LOOT", self.box_total_var, self.box_total_average_var, ("#FFEBC5", "#E99A38", "#9A5A1D")),
         )
         for position, (icon, title, value_var, detail_var, accent) in enumerate(box_tiles):
-            self._session_summary_tile(
-                summary,
-                position,
-                icon,
-                title,
-                value_var,
-                detail_var=detail_var,
-                accent=accent,
-                columnspan=self.box_columns if position == len(box_tiles) - 1 else 1,
-                columns=self.box_columns,
-                tile_count=len(box_tiles),
-            )
+            self._loot_tile(summary, position, icon, title, value_var, detail_var, accent, self.box_columns)
 
         warning = ctk.CTkFrame(card, corner_radius=11, fg_color="#F8F2F5")
         warning.pack(fill="x", padx=16, pady=(0, 14))
@@ -1005,8 +1446,8 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             corner_radius=0,
             border_width=0,
             fg_color=BG,
-            scrollbar_button_color="#D9DCE7",
-            scrollbar_button_hover_color="#C9CDD9",
+            scrollbar_button_color="#C9A982",
+            scrollbar_button_hover_color="#B88E62",
         )
         body.grid(row=0, column=0, sticky="nsew", padx=(12, 4), pady=(8, 7))
         body.grid_columnconfigure(0, weight=1)
@@ -1039,7 +1480,7 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             corner_radius=10,
             border_width=1,
             border_color=BORDER,
-            fg_color="#F8F8FC",
+            fg_color="#FFF8EA",
             text_color=TEXT,
             show="•",
             textvariable=self.telegram_token_var,
@@ -1057,7 +1498,7 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             corner_radius=10,
             border_width=1,
             border_color=BORDER,
-            fg_color="#F8F8FC",
+            fg_color="#FFF8EA",
             text_color=TEXT,
             textvariable=self.telegram_chat_var,
         )
@@ -1066,34 +1507,20 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
         actions = ctk.CTkFrame(card, fg_color="transparent")
         actions.pack(fill="x", padx=16, pady=(0, 14))
         actions.grid_columnconfigure((0, 1), weight=1)
-        self.telegram_save_button = ctk.CTkButton(
-            actions,
-            height=38,
-            corner_radius=10,
-            text="บันทึก",
-            fg_color=PURPLE,
-            hover_color=PURPLE_HOVER,
-            text_color="#FFFFFF",
-            font=self._font(10, "bold"),
-            command=self._save_telegram_settings,
+        self.telegram_save_button = GameSpriteButton(
+            actions, self._game_sprite("start", "#69BE4B"), "SAVE",
+            self._save_telegram_settings, width=168, height=38, canvas_bg=CARD,
+            font=("Segoe UI", 9, "bold"),
+            icon_image=self._draw_icon("check", "#FFFFFF", 64), icon_size=(15, 15),
         )
-        self.telegram_save_button.grid(
-            row=0, column=0, sticky="ew", padx=(0, 5)
+        self.telegram_save_button.grid(row=0, column=0, sticky="ew", padx=(0, 5), pady=0)
+        self.telegram_test_button = GameSpriteButton(
+            actions, self._game_sprite("blue", "#42AFC5"), "TEST SEND",
+            self._test_telegram, width=168, height=38, canvas_bg=CARD,
+            font=("Segoe UI", 9, "bold"),
+            icon_image=self._draw_icon("mail", "#FFFFFF", 64), icon_size=(16, 13),
         )
-        self.telegram_test_button = ctk.CTkButton(
-            actions,
-            height=38,
-            corner_radius=10,
-            text="ทดสอบส่ง",
-            fg_color="#F0F1F6",
-            hover_color="#E6E7EF",
-            text_color="#555A6E",
-            font=self._font(10, "bold"),
-            command=self._test_telegram,
-        )
-        self.telegram_test_button.grid(
-            row=0, column=1, sticky="ew", padx=(5, 0)
-        )
+        self.telegram_test_button.grid(row=0, column=1, sticky="ew", padx=(5, 0), pady=0)
 
         hint = ctk.CTkFrame(card, corner_radius=11, fg_color="#F0F4FB")
         hint.pack(fill="x", padx=16, pady=(0, 14))
@@ -1173,7 +1600,7 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
             parent,
             height=78,
             corner_radius=13,
-            fg_color="#FAFAFD",
+            fg_color="#FFF9EE",
             border_width=1,
             border_color=BORDER,
         )
@@ -1213,11 +1640,11 @@ class ModernCookieRunBotGUI(CookieRunBotGUI):
 
     def _set_status(self, text, state):
         colors = {
-            "idle": ("#EFF0F5", "#555A6E"),
-            "running": ("#DCF8E8", "#187044"),
-            "success": ("#DCF8E8", "#187044"),
-            "testing": ("#FFF2D2", "#946012"),
-            "error": ("#FFE5EA", "#B02D4A"),
+            "idle": ("#F4E9DD", "#71584A"),
+            "running": ("#DDF7EA", "#207855"),
+            "success": ("#DDF7EA", "#207855"),
+            "testing": ("#FFF0C9", "#8D5A16"),
+            "error": ("#FFE2E8", "#B33D59"),
         }
         background, foreground = colors.get(state, colors["idle"])
         self.status_var.set(text)
