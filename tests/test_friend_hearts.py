@@ -609,6 +609,73 @@ class FriendHeartTests(unittest.TestCase):
             ],
         )
 
+    def test_late_success_popup_after_brief_list_return_is_recovered(self):
+        leaderboard = _FriendLeaderboard(success_popup=False)
+        state = "heart"
+        post_confirm_captures = 0
+
+        def capture():
+            nonlocal state, post_confirm_captures
+            if state == "confirm":
+                return leaderboard.dimmed_screen
+            if state == "post_confirm":
+                post_confirm_captures += 1
+                if post_confirm_captures == 1:
+                    return leaderboard.bright_screen
+                if post_confirm_captures >= 7:
+                    state = "success"
+                    return leaderboard.success_screen
+                return leaderboard.dimmed_screen
+            if state == "success":
+                return leaderboard.success_screen
+            return leaderboard.bright_screen
+
+        def detect(_screen, templates, _region):
+            if templates == actions.STAGE_MAINMENU_TEMPLATE:
+                return [leaderboard.main_match] if state != "confirm" else []
+            if templates == actions.FRIEND_TOP_LEADERBOARD_TEMPLATE:
+                return [leaderboard.top_match] if state in {"heart", "post_confirm"} else []
+            if templates == actions.FRIEND_SEND_LIFE_TEMPLATE:
+                return [leaderboard.first_heart] if state == "heart" else []
+            if templates == actions.CONFIRM_SEND_LIFE_TEMPLATE:
+                return [leaderboard.confirm_match] if state == "confirm" else []
+            if templates == actions.FRIEND_BOTTOM_LEADERBOARD_TEMPLATE:
+                return [leaderboard.bottom_match] if state == "bottom" else []
+            return []
+
+        def tap(x, y):
+            nonlocal state
+            point = (x, y)
+            leaderboard.taps.append(point)
+            if state == "heart" and point == leaderboard._center(leaderboard.first_heart):
+                state = "confirm"
+            elif state == "confirm" and point == leaderboard._center(leaderboard.confirm_match):
+                state = "post_confirm"
+            elif state == "success" and point == leaderboard._center(leaderboard.acknowledgement_match):
+                state = "bottom"
+
+        def detect_ack(_screen):
+            if state == "success":
+                return leaderboard.acknowledgement_match
+            return None
+
+        sent_count = actions.handle_send_friend_life(
+            capture_func=capture,
+            detect_func=detect,
+            tap_func=tap,
+            scroll_func=leaderboard.scroll,
+            sleep_func=lambda _seconds: None,
+            active_button_func=lambda _screen, _match: True,
+            acknowledgement_detector_func=detect_ack,
+        )
+
+        self.assertEqual(sent_count, 1)
+        self.assertEqual(state, "bottom")
+        self.assertIn(
+            leaderboard._center(leaderboard.acknowledgement_match),
+            leaderboard.taps,
+        )
+
     def test_green_gate_rejects_a_grey_disabled_envelope(self):
         active_screen = np.zeros((100, 160, 3), dtype=np.uint8)
         disabled_screen = np.zeros_like(active_screen)
@@ -686,6 +753,64 @@ class FriendHeartTests(unittest.TestCase):
         self.assertTrue(actions._friend_list_is_stable(screen, screen.copy()))
         self.assertFalse(actions._friend_list_is_stable(screen, moved))
         self.assertTrue(actions._friend_list_is_stable(screen, animated))
+
+    def test_delayed_acknowledgement_after_list_flash_is_closed_before_next_scan(self):
+        """Regression for live run: a success popup can appear after one bright list frame."""
+        leaderboard = _FriendLeaderboard(success_popup=False)
+        state = "heart"
+        post_confirm_captures = 0
+
+        def capture():
+            nonlocal state, post_confirm_captures
+            if state == "confirm":
+                return leaderboard.dimmed_screen
+            if state == "post_confirm":
+                post_confirm_captures += 1
+                if post_confirm_captures == 1:
+                    return leaderboard.bright_screen
+                state = "delayed_ack"
+                return leaderboard.success_screen
+            if state == "delayed_ack":
+                return leaderboard.success_screen
+            return leaderboard.bright_screen
+
+        def detect(_screen, templates, _region):
+            if templates == actions.STAGE_MAINMENU_TEMPLATE:
+                return [leaderboard.main_match] if state in {"heart", "post_confirm", "bottom"} else []
+            if templates == actions.FRIEND_TOP_LEADERBOARD_TEMPLATE:
+                return [leaderboard.top_match] if state in {"heart", "post_confirm", "bottom"} else []
+            if templates == actions.FRIEND_SEND_LIFE_TEMPLATE:
+                return [leaderboard.first_heart] if state == "heart" else []
+            if templates == actions.CONFIRM_SEND_LIFE_TEMPLATE:
+                return [leaderboard.confirm_match] if state == "confirm" else []
+            if templates == actions.FRIEND_BOTTOM_LEADERBOARD_TEMPLATE:
+                return [leaderboard.bottom_match] if state == "bottom" else []
+            return []
+
+        def tap(x, y):
+            nonlocal state
+            point = (x, y)
+            leaderboard.taps.append(point)
+            if state == "heart" and point == leaderboard._center(leaderboard.first_heart):
+                state = "confirm"
+            elif state == "confirm" and point == leaderboard._center(leaderboard.confirm_match):
+                state = "post_confirm"
+            elif state == "delayed_ack" and point == leaderboard._center(leaderboard.acknowledgement_match):
+                state = "bottom"
+
+        sent_count = actions.handle_send_friend_life(
+            capture_func=capture,
+            detect_func=detect,
+            tap_func=tap,
+            scroll_func=leaderboard.scroll,
+            sleep_func=lambda _seconds: None,
+            active_button_func=lambda _screen, _match: True,
+            recovery_capture_attempts=2,
+        )
+
+        self.assertEqual(sent_count, 1)
+        self.assertIn(leaderboard._center(leaderboard.acknowledgement_match), leaderboard.taps)
+        self.assertEqual(state, "bottom")
 
     def test_large_green_acknowledgement_is_detected_by_shape(self):
         leaderboard = _FriendLeaderboard()

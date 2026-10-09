@@ -27,6 +27,7 @@ class _Mailbox:
         self.stuck_confirm = stuck_confirm
         self.state = "leaderboard"
         self.receive_clicked = False
+        self.final_acknowledged = False
         self.confirm_hidden_until = -1
         self.all_visible_from = 10**9
         self.capture_index = 0
@@ -52,6 +53,7 @@ class _Mailbox:
                 self.receive_clicked
                 and self.hearts == 0
                 and self.capture_index >= self.all_visible_from
+                and not self.final_acknowledged
             ):
                 return [self.all_done_match]
             return []
@@ -92,6 +94,7 @@ class _Mailbox:
         elif point == _center(self.all_done_match) or point == tuple(
             actions.ACCEPT_ALL_LIVES_RECEIVED_AND_SENT_BUTTON
         ):
+            self.final_acknowledged = True
             self.state = "mailbox"  # accept keeps us inside the mailbox
         elif point == tuple(actions.MAIL_BOX_CLOSE_BUTTON):
             self.state = "closed"
@@ -121,6 +124,138 @@ class MailboxHeartsActionTests(unittest.TestCase):
         self.assertIn(tuple(actions.QUICK_RECEIVE_AND_SEND_LIVES_BUTTON), mailbox.taps)
         self.assertIn(_center(mailbox.confirm_match), mailbox.taps)
         self.assertIn(tuple(actions.ACCEPT_ALL_LIVES_RECEIVED_AND_SENT_BUTTON), mailbox.taps)
+        self.assertEqual(mailbox.taps[-1], tuple(actions.MAIL_BOX_CLOSE_BUTTON))
+
+    def test_final_all_done_dialog_must_actually_close_before_mailbox_exit(self):
+        """Regression: the live final Confirm button is around y=460, not y=520."""
+        mailbox = _Mailbox(hearts=1)
+        final_confirm = (500, 410, 280, 96)
+        final_confirm_center = _center(final_confirm)
+        final_acknowledged = False
+        original_tap = mailbox.tap
+
+        def tap_with_real_final_modal(x, y):
+            nonlocal final_acknowledged
+            point = (x, y)
+            mailbox.taps.append(point)
+
+            final_modal_visible = (
+                mailbox.receive_clicked
+                and mailbox.hearts == 0
+                and mailbox.capture_index >= mailbox.all_visible_from
+                and not final_acknowledged
+            )
+            if final_modal_visible:
+                if point == final_confirm_center:
+                    final_acknowledged = True
+                # While the modal is visible, taps behind it (including the
+                # mailbox X) do nothing in the real game.
+                return
+
+            mailbox.taps.pop()
+            original_tap(x, y)
+
+        green_hsv = np.uint8([[[40, 210, 210]]])
+        green_bgr = cv2.cvtColor(green_hsv, cv2.COLOR_HSV2BGR)[0, 0]
+
+        def capture_with_final_button():
+            screen = mailbox.capture().copy()
+            final_modal_visible = (
+                mailbox.receive_clicked
+                and mailbox.hearts == 0
+                and mailbox.capture_index >= mailbox.all_visible_from
+                and not final_acknowledged
+            )
+            if final_modal_visible:
+                x, y, width, height = final_confirm
+                cv2.rectangle(
+                    screen,
+                    (x, y),
+                    (x + width - 1, y + height - 1),
+                    tuple(int(value) for value in green_bgr),
+                    -1,
+                )
+            return screen
+
+        def detect_with_final_button(screen, templates, region):
+            if templates == actions.ALL_LIVES_RECEIVED_AND_SENT_TEMPLATE:
+                if final_acknowledged:
+                    return []
+                return mailbox.detect(screen, templates, region)
+            return mailbox.detect(screen, templates, region)
+
+        processed = actions.handle_mailbox_receive_and_send_lives(
+            capture_func=capture_with_final_button,
+            detect_func=detect_with_final_button,
+            tap_func=tap_with_real_final_modal,
+            sleep_func=lambda _seconds: None,
+        )
+
+        self.assertEqual(processed, 1)
+        self.assertTrue(final_acknowledged)
+        self.assertIn(final_confirm_center, mailbox.taps)
+        self.assertEqual(mailbox.state, "closed")
+
+    def test_transient_dark_mailbox_frame_is_retried_not_reported_complete(self):
+        mailbox = _Mailbox(hearts=1)
+        dark_once = {"used": False}
+
+        def capture_with_one_dark_transition():
+            if mailbox.receive_clicked and not dark_once["used"]:
+                dark_once["used"] = True
+                mailbox.capture_index += 1
+                return np.zeros((720, 1280, 3), dtype=np.uint8)
+            return mailbox.capture()
+
+        def detect_with_dark_guard(screen, templates, region):
+            if float(screen.mean()) < 1.0:
+                return []
+            return mailbox.detect(screen, templates, region)
+
+        processed = actions.handle_mailbox_receive_and_send_lives(
+            capture_func=capture_with_one_dark_transition,
+            detect_func=detect_with_dark_guard,
+            tap_func=mailbox.tap,
+            sleep_func=lambda _seconds: None,
+            panel_recovery_attempts=3,
+        )
+
+        self.assertTrue(dark_once["used"])
+        self.assertEqual(processed, 1)
+        self.assertEqual(mailbox.taps[-1], tuple(actions.MAIL_BOX_CLOSE_BUTTON))
+
+    def test_slow_mailbox_transition_survives_more_than_four_dark_frames(self):
+        mailbox = _Mailbox(hearts=2)
+        dark_frames_remaining = 0
+        original_tap = mailbox.tap
+
+        def tap_with_slow_transition(x, y):
+            nonlocal dark_frames_remaining
+            original_tap(x, y)
+            if (x, y) == _center(mailbox.confirm_match):
+                dark_frames_remaining = 6
+
+        def capture_with_slow_transition():
+            nonlocal dark_frames_remaining
+            if dark_frames_remaining > 0:
+                dark_frames_remaining -= 1
+                mailbox.capture_index += 1
+                return np.zeros((720, 1280, 3), dtype=np.uint8)
+            return mailbox.capture()
+
+        def detect_with_dark_guard(screen, templates, region):
+            if float(screen.mean()) < 1.0:
+                return []
+            return mailbox.detect(screen, templates, region)
+
+        processed = actions.handle_mailbox_receive_and_send_lives(
+            capture_func=capture_with_slow_transition,
+            detect_func=detect_with_dark_guard,
+            tap_func=tap_with_slow_transition,
+            sleep_func=lambda _seconds: None,
+        )
+
+        self.assertEqual(processed, 2)
         self.assertEqual(mailbox.taps[-1], tuple(actions.MAIL_BOX_CLOSE_BUTTON))
 
     def test_no_lives_closes_without_pressing_receive_all(self):
@@ -172,20 +307,28 @@ class MailboxHeartsActionTests(unittest.TestCase):
 
         self.assertEqual(mailbox.state, "leaderboard")
 
-    def test_finishes_cleanly_when_confirm_never_clears(self):
+    def test_fails_loudly_when_confirm_never_advances(self):
         mailbox = _Mailbox(hearts=2, stuck_confirm=True)
 
-        # A frozen UI should not raise: count what was handled and finish.
-        processed = actions.handle_mailbox_receive_and_send_lives(
-            capture_func=mailbox.capture,
-            detect_func=mailbox.detect,
-            tap_func=mailbox.tap,
-            sleep_func=lambda _seconds: None,
-            confirm_poll_attempts=2,
-        )
+        with self.assertRaisesRegex(RuntimeError, "Confirm did not advance"):
+            actions.handle_mailbox_receive_and_send_lives(
+                capture_func=mailbox.capture,
+                detect_func=mailbox.detect,
+                tap_func=mailbox.tap,
+                sleep_func=lambda _seconds: None,
+                confirm_poll_attempts=2,
+                confirm_tap_attempts=3,
+            )
 
-        self.assertEqual(processed, 0)
-        self.assertEqual(mailbox.taps[-1], tuple(actions.MAIL_BOX_CLOSE_BUTTON))
+        self.assertNotEqual(mailbox.taps[-1], tuple(actions.MAIL_BOX_CLOSE_BUTTON))
+
+    def test_back_to_back_confirm_visual_change_counts_as_progress(self):
+        before = np.full((720, 1280, 3), 70, dtype=np.uint8)
+        after = before.copy()
+        after[250:340, 430:780] = 150
+
+        self.assertTrue(actions._mailbox_dialog_has_progressed(before, after))
+        self.assertFalse(actions._mailbox_dialog_has_progressed(before, before.copy()))
 
 
 class MailboxHeartsBotEntryTests(unittest.TestCase):

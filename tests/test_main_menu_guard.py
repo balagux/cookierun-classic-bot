@@ -22,7 +22,7 @@ def _options():
 
 class MainMenuGuardTests(unittest.TestCase):
     def test_normal_main_menu_with_friends_panel_starts_without_back(self):
-        screen = np.zeros((720, 1280, 3), dtype=np.uint8)
+        screen = np.full((720, 1280, 3), 225, dtype=np.uint8)
         with (
             mock.patch.object(bot, "device_connect"),
             mock.patch.object(bot, "device_capture_screen", return_value=screen),
@@ -42,7 +42,7 @@ class MainMenuGuardTests(unittest.TestCase):
         start.assert_called_once()
 
     def test_starts_immediately_when_main_menu_is_detected(self):
-        screen = np.zeros((720, 1280, 3), dtype=np.uint8)
+        screen = np.full((720, 1280, 3), 225, dtype=np.uint8)
         output = io.StringIO()
         # MAINMENU is detected, then the loop is stopped. Starting the game must
         # not press BACK or depend on a Friends leaderboard being open.
@@ -63,7 +63,7 @@ class MainMenuGuardTests(unittest.TestCase):
         self.assertGreaterEqual(start.call_count, 1)
 
     def test_starts_normally_when_leaderboard_is_absent(self):
-        screen = np.zeros((720, 1280, 3), dtype=np.uint8)
+        screen = np.full((720, 1280, 3), 225, dtype=np.uint8)
         output = io.StringIO()
         with (
             mock.patch.object(bot, "device_connect"),

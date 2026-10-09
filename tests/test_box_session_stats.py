@@ -140,7 +140,7 @@ class BoxStatsMainLifecycleTests(unittest.TestCase):
         }
 
     def test_duplicate_mystery_box_stage_counts_dialog_only_once(self):
-        screen = np.zeros((720, 1280, 3), dtype=np.uint8)
+        screen = np.full((720, 1280, 3), 225, dtype=np.uint8)
         output = io.StringIO()
         stages = [
             "PURCHASE_ITEM",

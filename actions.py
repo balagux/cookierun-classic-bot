@@ -58,6 +58,7 @@ from config import (
     MULTI_BUY_BUTTON,
     MULTI_PURCHASE_BUTTON,
     NEWS_CLOSE_BUTTON,
+    NEWS_CLOSE_REGION,
     NO_LIVES_TO_RECEIVE_REGION,
     NO_LIVES_TO_RECEIVE_TEMPLATE,
     PLAY_BUTTON,
@@ -87,6 +88,7 @@ from config import (
     STAGE_GAME_RELAY_TEMPLATE,
     STAGE_MAINMENU_REGION,
     STAGE_MAINMENU_TEMPLATE,
+    STAGE_NEWS_CLOSE_TEMPLATE,
 )
 from detection import (
     detect_all_template_matches,
@@ -800,7 +802,7 @@ def handle_send_friend_life(
     settle_poll_attempts=8,
     scroll_attempts=2,
     scroll_settle_poll_attempts=6,
-    recovery_capture_attempts=4,
+    recovery_capture_attempts=12,
     recovery_sleep=0.25,
 ):
     """Send each visible active friend heart once, recapturing after every tap.
@@ -917,13 +919,54 @@ def handle_send_friend_life(
                 "The Friends leaderboard safety limit was reached after "
                 f"{sent_count} confirmed heart(s)."
             )
+        # The success acknowledgement can appear a frame *after* the Friends
+        # list briefly becomes bright again.  In that case the previous send is
+        # already counted, but the next loop sees only the modal and used to
+        # abort after recovery retries.  Always clear a detected large success
+        # button before deciding that the leaderboard was lost.
+        delayed_acknowledgement = acknowledgement_detector_func(screen)
+        if delayed_acknowledgement is not None:
+            ack_x, ack_y, ack_width, ack_height = delayed_acknowledgement
+            print("💌 Closing delayed heart-sent acknowledgement...")
+            tap_func(
+                ack_x + ack_width // 2,
+                ack_y + ack_height // 2,
+            )
+            acknowledgement_closed = False
+            for _ in range(max(1, int(list_return_poll_attempts))):
+                sleep_func(0.15)
+                screen = capture_or_raise()
+                if (
+                    acknowledgement_detector_func(screen) is None
+                    and has_ready_leaderboard(screen)
+                ):
+                    acknowledgement_closed = True
+                    break
+            if not acknowledgement_closed:
+                raise RuntimeError(
+                    "The delayed heart-sent acknowledgement did not close. "
+                    f"Stopped safely after {sent_count} confirmed heart(s)."
+                )
+            continue
+
         if not has_ready_leaderboard(screen):
-            # One animation/dim frame is not a failure. Re-capture before
-            # aborting the heart worker.
+            # A successful send can briefly return to the list, then dim again
+            # while the acknowledgement animates in.  Older builds treated that
+            # short transition as a lost leaderboard and aborted the whole batch.
             recovered = False
             for _ in range(max(1, int(recovery_capture_attempts))):
                 sleep_func(max(0.0, float(recovery_sleep)))
                 screen = capture_or_raise()
+                delayed_acknowledgement = acknowledgement_detector_func(screen)
+                if delayed_acknowledgement is not None:
+                    ack_x, ack_y, ack_width, ack_height = delayed_acknowledgement
+                    print("💌 Closing late heart-sent acknowledgement during recovery...")
+                    tap_func(
+                        ack_x + ack_width // 2,
+                        ack_y + ack_height // 2,
+                    )
+                    sleep_func(0.15)
+                    screen = capture_or_raise()
                 if has_ready_leaderboard(screen):
                     recovered = True
                     break
@@ -1238,7 +1281,9 @@ def handle_mailbox_receive_and_send_lives(
     # budget before declaring the safety limit reached.
     max_total_iterations=300,
     confirm_poll_attempts=6,
-    progress_poll_attempts=8,
+    confirm_tap_attempts=4,
+    progress_poll_attempts=12,
+    panel_recovery_attempts=10,
     tap_interval=0.55,
 ):
     """Receive mailbox hearts and send lives back, one green Confirm at a time.
@@ -1348,33 +1393,52 @@ def handle_mailbox_receive_and_send_lives(
         sleep_func(0.4)
         total_iterations = 0
         stalled_frames = 0
+        missing_panel_frames = 0
         while total_iterations < max(0, int(max_total_iterations)):
             total_iterations += 1
             screen = capture_or_raise()
 
-            # The mailbox ran out of hearts (or the game dropped to a dark
-            # screen) and the Lives panel is no longer visible.  Stop instead
-            # of re-tapping "Quick Receive and Send Lives" forever.
-            if not _mailbox_window_open(screen):
-                print(
-                    "✉️ Mailbox Lives panel is no longer visible; "
-                    f"stopping after {processed_count} processed heart(s)."
-                )
-                break
-
+            # Completion is verified below from semantic mailbox states.
             all_done = matches(
                 screen,
                 ALL_LIVES_RECEIVED_AND_SENT_TEMPLATE,
                 ALL_LIVES_RECEIVED_AND_SENT_REGION,
             )
             if all_done:
-                # "All Lives received and sent!" uses its own green Confirm in
-                # the middle of the dialog, not the per-friend Confirm.  Use the
-                # dedicated coordinate so the tap lands on the actual button.
+                # "All Lives received and sent!" uses a large green Confirm in
+                # the middle of the dialog. Detect that live button first: the
+                # game's current layout places it around y=460, while the old
+                # fixed coordinate (y=520) landed below the button. Never report
+                # completion until the final modal is actually gone.
                 print("✉️ All mailbox lives received and sent. Confirming...")
-                accept_x, accept_y = ACCEPT_ALL_LIVES_RECEIVED_AND_SENT_BUTTON[:2]
-                tap_func(accept_x, accept_y)
-                sleep_func(0.4)
+                final_confirm_closed = False
+                for final_attempt in range(1, 4):
+                    detected_button = _detect_friend_acknowledgement_button(screen)
+                    if detected_button:
+                        button_x, button_y, button_width, button_height = detected_button
+                        accept_x = button_x + button_width // 2
+                        accept_y = button_y + button_height // 2
+                    else:
+                        accept_x, accept_y = ACCEPT_ALL_LIVES_RECEIVED_AND_SENT_BUTTON[:2]
+                    tap_func(accept_x, accept_y)
+                    sleep_func(0.35)
+                    screen = capture_or_raise()
+                    remaining_done = matches(
+                        screen,
+                        ALL_LIVES_RECEIVED_AND_SENT_TEMPLATE,
+                        ALL_LIVES_RECEIVED_AND_SENT_REGION,
+                    )
+                    if not remaining_done:
+                        final_confirm_closed = True
+                        break
+                    print(
+                        f"✉️ Final mailbox Confirm is still visible "
+                        f"({final_attempt}/3); retrying..."
+                    )
+                if not final_confirm_closed:
+                    raise RuntimeError(
+                        "The final mailbox Confirm did not close after 3 attempts."
+                    )
                 break
 
             confirm_matches = matches(
@@ -1383,16 +1447,20 @@ def handle_mailbox_receive_and_send_lives(
                 CONFIRM_SEND_LIFE_REGION,
             )
             if confirm_matches:
+                before_confirm_screen = screen
                 confirm_x, confirm_y, confirm_width, confirm_height = sorted(
                     confirm_matches,
                     key=lambda match: (match[1], match[0]),
                 )[0]
                 print(f"✉️ Confirming mailbox heart #{processed_count + 1}...")
-                # Tap the detected Confirm, then wait for it to clear.  A frozen
-                # game UI (common when opening many dialogs quickly) can swallow
-                # the first tap, so retry a couple of times before giving up.
-                confirmation_cleared = False
-                for tap_attempt in range(1, 3):
+                # CookieRun can replace one Confirm dialog directly with the
+                # next one, so button disappearance alone is not a reliable
+                # progress signal for large mailboxes.
+                confirmation_advanced = False
+                for tap_attempt in range(
+                    1,
+                    max(1, int(confirm_tap_attempts)) + 1,
+                ):
                     tap_func(
                         confirm_x + confirm_width // 2,
                         confirm_y + confirm_height // 2,
@@ -1405,36 +1473,52 @@ def handle_mailbox_receive_and_send_lives(
                             CONFIRM_SEND_LIFE_TEMPLATE,
                             CONFIRM_SEND_LIFE_REGION,
                         )
-                        if not remaining:
-                            confirmation_cleared = True
+                        finished_after_tap = matches(
+                            screen,
+                            ALL_LIVES_RECEIVED_AND_SENT_TEMPLATE,
+                            ALL_LIVES_RECEIVED_AND_SENT_REGION,
+                        )
+                        no_lives_after_tap = matches(
+                            screen,
+                            NO_LIVES_TO_RECEIVE_TEMPLATE,
+                            NO_LIVES_TO_RECEIVE_REGION,
+                        )
+                        if (
+                            not remaining
+                            or finished_after_tap
+                            or no_lives_after_tap
+                            or _mailbox_dialog_has_progressed(
+                                before_confirm_screen,
+                                screen,
+                            )
+                        ):
+                            confirmation_advanced = True
                             break
-                    if confirmation_cleared:
+                    if confirmation_advanced:
                         break
                     print(
-                        f"✉️ Confirm did not clear (tap {tap_attempt}/2); "
+                        "✉️ Confirm did not advance "
+                        f"(tap {tap_attempt}/{max(1, int(confirm_tap_attempts))}); "
                         "retrying..."
                     )
-                    if tap_attempt == 1:
-                        # A modal may still be animating in; give it more time.
-                        sleep_func(0.4)
-                # Always leave a short pause between processed hearts so the
-                # game UI does not get spammed and freeze (100-200 hearts need
-                # a gentle cadence to stay responsive).
+                    sleep_func(0.4)
+                # Keep a gentle cadence so 100-200 heart batches do not overload
+                # the game's UI thread.
                 sleep_func(float(tap_interval))
-                if not confirmation_cleared:
+                if not confirmation_advanced:
                     try:
                         save_debug_screen(screen)
                     except Exception as exc:
                         print(f"⚠️ Could not save mailbox screenshot: {exc}")
-                    # Do not throw: a frozen UI should not permanently break the
-                    # worker.  Count what we already handled and finish cleanly.
-                    print(
-                        "⚠️ Mailbox confirm appears frozen; finishing with "
-                        f"{processed_count} processed heart(s)."
+                    raise RuntimeError(
+                        "The mailbox Confirm did not advance after "
+                        f"{max(1, int(confirm_tap_attempts))} verified taps. "
+                        "Stopped instead of reporting a partial batch as "
+                        f"complete ({processed_count} heart(s) processed)."
                     )
-                    break
                 processed_count += 1
                 stalled_frames = 0
+                missing_panel_frames = 0
                 continue
 
             if matches(
@@ -1444,6 +1528,29 @@ def handle_mailbox_receive_and_send_lives(
             ):
                 print("✉️ Mailbox lives ran out — finishing.")
                 break
+
+            # Transient animation frames can dim this region.  The previous
+            # one-frame check reported success halfway through a large batch.
+            if not _mailbox_window_open(screen):
+                missing_panel_frames += 1
+                if missing_panel_frames < max(1, int(panel_recovery_attempts)):
+                    print(
+                        "✉️ Mailbox panel temporarily not visible; "
+                        f"re-checking ({missing_panel_frames}/"
+                        f"{max(1, int(panel_recovery_attempts))})..."
+                    )
+                    sleep_func(0.3)
+                    continue
+                try:
+                    save_debug_screen(screen)
+                except Exception as exc:
+                    print(f"⚠️ Could not save mailbox screenshot: {exc}")
+                raise RuntimeError(
+                    "The mailbox Lives panel disappeared before an explicit "
+                    "finished state. Stopped safely after "
+                    f"{processed_count} mailbox heart(s)."
+                )
+            missing_panel_frames = 0
 
             stalled_frames += 1
             if stalled_frames >= max(1, int(progress_poll_attempts)):
@@ -1488,17 +1595,20 @@ def _popup_still_visible(screen):
     """Return True while an announcement/event popup covers the screen."""
     if screen is None:
         return False
-    return detect_stage(screen, list(POPUP_CLOSE_VERIFY_STAGES)) is not None
+    if detect_stage(screen, list(POPUP_CLOSE_VERIFY_STAGES)) is not None:
+        return True
+    # If the normal START area is bright again, the overlay is already gone and
+    # no second stage-detection pass is needed.
+    if main_menu_start_area_clear(screen):
+        return False
+    # New event popups do not always have a template yet.  When the Main Menu
+    # is still detectable underneath a dark modal, keep treating the overlay as
+    # open instead of accepting the first wrong X tap as success.
+    return detect_stage(screen, ("MAINMENU",)) == "MAINMENU"
 
 
 def close_news_dialog():
-    """Close the "News" announcement popup by tapping its dedicated X button.
-
-    The News banner (e.g. the Mango Sticky Rice update) uses a dark circular
-    X in the teal header corner at (1125, 55), which the generic announcement
-    close coordinates miss.  Returns True when the stage is cleared, False
-    when it could not be dismissed.
-    """
+    """Close the News popup using the detected X, then bounded fallbacks."""
     print("📰 Closing News popup...")
     try:
         screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
@@ -1507,18 +1617,36 @@ def close_news_dialog():
     if detect_stage(screen, ("NEWS",)) != "NEWS":
         print("📰 News popup not detected — nothing to close.")
         return True
-    safe_device_tap(
-        DEVICE_IP,
-        DEVICE_PORT,
-        NEWS_CLOSE_BUTTON[0],
-        NEWS_CLOSE_BUTTON[1],
+
+    close_points = []
+    close_matches = detect_all_template_matches(
+        screen,
+        STAGE_NEWS_CLOSE_TEMPLATE,
+        NEWS_CLOSE_REGION,
     )
-    time.sleep(random.uniform(0.8, 1.4))
-    screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
-    if detect_stage(screen, ("NEWS",)) != "NEWS":
-        print("✅ News popup closed.")
-        return True
-    # Fall back to the generic announcement sweep if the dedicated point fails.
+    if close_matches:
+        close_x, close_y, close_width, close_height = sorted(
+            close_matches,
+            key=lambda match: (match[1], match[0]),
+        )[0]
+        close_points.append(
+            (close_x + close_width // 2, close_y + close_height // 2)
+        )
+
+    # Keep the historical coordinate as a fallback for clients where the X
+    # template is temporarily obscured by animation/compression.
+    if NEWS_CLOSE_BUTTON not in close_points:
+        close_points.append(NEWS_CLOSE_BUTTON)
+
+    for close_x, close_y in close_points:
+        safe_device_tap(DEVICE_IP, DEVICE_PORT, close_x, close_y)
+        time.sleep(random.uniform(0.8, 1.4))
+        screen = device_capture_screen(DEVICE_IP, DEVICE_PORT)
+        if not _popup_still_visible(screen):
+            print("✅ News popup closed.")
+            return True
+
+    # Fall back to the generic announcement sweep if dedicated X attempts fail.
     return close_announcement_dialog()
 
 
@@ -1598,6 +1726,38 @@ def _mailbox_window_open(screen):
     if screen is None or not hasattr(screen, "shape"):
         return False
     return _region_mean_brightness(screen, FRIEND_SEND_LIFE_REGION) >= 70.0
+
+
+def _mailbox_dialog_has_progressed(before_screen, after_screen):
+    """Return True when a Confirm tap visibly advanced to another mailbox item.
+
+    CookieRun can replace one per-friend Confirm dialog directly with the next
+    one, so the Confirm template may remain continuously visible. Compare only
+    the sender/message area above the button so press/glow animation cannot be
+    mistaken for progress.
+    """
+    if (
+        before_screen is None
+        or after_screen is None
+        or not hasattr(before_screen, "shape")
+        or not hasattr(after_screen, "shape")
+        or before_screen.shape[:2] != after_screen.shape[:2]
+    ):
+        return False
+
+    x1, y1, x2, y2 = (360, 190, 1000, 355)
+    before_roi = before_screen[y1:y2, x1:x2]
+    after_roi = after_screen[y1:y2, x1:x2]
+    if before_roi.size == 0 or after_roi.size == 0:
+        return False
+
+    before_gray = cv2.cvtColor(before_roi, cv2.COLOR_BGR2GRAY)
+    after_gray = cv2.cvtColor(after_roi, cv2.COLOR_BGR2GRAY)
+    diff = cv2.absdiff(before_gray, after_gray)
+    _, changed = cv2.threshold(diff, 18, 255, cv2.THRESH_BINARY)
+    changed_ratio = cv2.countNonZero(changed) / float(changed.size)
+    mean_delta = float(diff.mean())
+    return changed_ratio >= 0.025 and mean_delta >= 2.0
 
 
 def main_menu_start_area_clear(screen):

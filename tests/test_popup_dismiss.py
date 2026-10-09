@@ -90,6 +90,36 @@ class CloseAnnouncementDialogTests(unittest.TestCase):
         back.assert_called_once()
         save_debug.assert_called_once()
 
+    def test_unknown_event_overlay_is_not_mistaken_for_closed_after_wrong_x(self):
+        dim_screen = np.full((720, 1280, 3), 70, dtype=np.uint8)
+        bright_screen = np.full((720, 1280, 3), 225, dtype=np.uint8)
+        captures = iter([dim_screen, dim_screen, bright_screen])
+
+        def detect_unknown_overlay(_screen, stage_names):
+            if tuple(stage_names) == ("MAINMENU",):
+                return "MAINMENU"
+            return None
+
+        with (
+            mock.patch.object(actions, "safe_device_tap") as tap,
+            mock.patch.object(
+                actions,
+                "device_capture_screen",
+                side_effect=lambda *_args: next(captures),
+            ),
+            mock.patch.object(
+                actions,
+                "detect_stage",
+                side_effect=detect_unknown_overlay,
+            ),
+            mock.patch.object(actions, "device_back") as back,
+        ):
+            closed = actions.close_announcement_dialog()
+
+        self.assertTrue(closed)
+        self.assertEqual(tap.call_count, 3)
+        back.assert_not_called()
+
 
 class CloseNewsDialogTests(unittest.TestCase):
     def setUp(self):
@@ -125,6 +155,37 @@ class CloseNewsDialogTests(unittest.TestCase):
             actions.DEVICE_PORT,
             actions.NEWS_CLOSE_BUTTON[0],
             actions.NEWS_CLOSE_BUTTON[1],
+        )
+
+    def test_news_popup_uses_detected_x_center_before_fixed_coordinate(self):
+        bright_screen = np.full((720, 1280, 3), 225, dtype=np.uint8)
+        close_match = (1100, 30, 40, 40)
+        with (
+            mock.patch.object(actions, "safe_device_tap") as tap,
+            mock.patch.object(
+                actions,
+                "device_capture_screen",
+                return_value=bright_screen,
+            ),
+            mock.patch.object(
+                actions,
+                "detect_all_template_matches",
+                return_value=[close_match],
+            ),
+            mock.patch.object(
+                actions,
+                "detect_stage",
+                side_effect=["NEWS", None],
+            ),
+        ):
+            closed = actions.close_news_dialog()
+
+        self.assertTrue(closed)
+        tap.assert_called_once_with(
+            actions.DEVICE_IP,
+            actions.DEVICE_PORT,
+            1120,
+            50,
         )
 
     def test_news_popup_returns_true_when_not_detected(self):
@@ -169,6 +230,12 @@ class CloseNewsDialogTests(unittest.TestCase):
         for group in ("PRE_GAME", "IN_GAME", "POST_GAME"):
             self.assertIn("NEWS", bot.get_detection_stage_names(group))
         self.assertIn("NEWS", config.DETECTION_ALWAYS_STAGES)
+
+    def test_in_game_popup_stages_are_checked_before_gameplay_stages(self):
+        stages = bot.get_detection_stage_names("IN_GAME")
+        first_gameplay = stages.index("GAME_START")
+        self.assertLess(stages.index("NEWS"), first_gameplay)
+        self.assertLess(stages.index("ANNOUNCEMENT"), first_gameplay)
 
 
 class DismissOverlayOverMainMenuTests(unittest.TestCase):
@@ -272,7 +339,7 @@ class MainMenuStartStallGuardTests(unittest.TestCase):
         reset.assert_called()
 
     def test_clean_main_menu_starts_without_overlay_dismissal(self):
-        screen = np.zeros((720, 1280, 3), dtype=np.uint8)
+        screen = np.full((720, 1280, 3), 225, dtype=np.uint8)
         with (
             mock.patch.object(bot, "device_connect"),
             mock.patch.object(bot, "device_capture_screen", return_value=screen),
@@ -296,6 +363,33 @@ class MainMenuStartStallGuardTests(unittest.TestCase):
 
         start.assert_called()
         dismiss.assert_not_called()
+
+    def test_dimmed_main_menu_overlay_is_dismissed_before_start_tap(self):
+        screen = np.full((720, 1280, 3), 70, dtype=np.uint8)
+        with (
+            mock.patch.object(bot, "device_connect"),
+            mock.patch.object(bot, "device_capture_screen", return_value=screen),
+            mock.patch.object(bot, "load_templates"),
+            mock.patch.object(bot, "detect_all_template_matches", return_value=[]),
+            mock.patch.object(
+                bot,
+                "detect_stage",
+                side_effect=["MAINMENU", KeyboardInterrupt()],
+            ),
+            mock.patch.object(bot, "start_game") as start,
+            mock.patch.object(
+                bot.actions_module,
+                "dismiss_overlay_over_main_menu",
+                return_value=True,
+            ) as dismiss,
+            mock.patch.object(bot, "device_back"),
+            mock.patch.object(bot.time, "sleep"),
+            mock.patch("sys.stdout", io.StringIO()),
+        ):
+            bot.main(_options())
+
+        dismiss.assert_called_once()
+        start.assert_not_called()
 
     def test_announcement_popup_that_cannot_close_resets_app(self):
         screen = np.zeros((720, 1280, 3), dtype=np.uint8)

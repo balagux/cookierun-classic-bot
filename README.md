@@ -3,10 +3,36 @@
 โปรแกรมช่วยจัดการรอบ CookieRun Classic บน Windows ผ่าน ADB และ OpenCV โดยเน้นเมนูที่จำเป็น:
 เชื่อมต่อเกม เลือกซื้อไอเทม และสั่ง START/STOP บอทจากหน้าต่างขนาดกะทัดรัด
 
-> เวอร์ชันปัจจุบัน: **1.4.18**
+> เวอร์ชันปัจจุบัน: **1.4.21**
 >
 > โปรแกรมนี้เป็นโครงการทดลองด้าน Automation และ Computer Vision การใช้งานกับบัญชีจริง
 > อาจขัดกับข้อกำหนดของเกม ผู้ใช้ต้องรับผิดชอบความเสี่ยงด้วยตนเอง
+
+## Release 1.4.21
+
+- เพิ่มความทนของ **ส่งหัวใจ** ต่อช่วง transition หลัง Confirm: รอ recovery ได้นานขึ้นและปิด `Message sent!` ที่โผล่ช้าระหว่าง recovery ก่อนทำรายการถัดไป
+- เพิ่มความทนของ **รับ/ส่งหัวใจ Mailbox** ต่อเฟรมมืด/animation ที่กินเวลาหลายเฟรม โดยไม่รีบสรุปว่าหน้า Mailbox หาย
+- แก้ **Event/Announcement ใหม่ที่ยังไม่มี template**: ถ้า Main Menu ยังถูก overlay บัง จะไม่ถือว่าปิด popup สำเร็จจากการกด X ผิดตำแหน่งครั้งแรก
+- เพิ่ม regression tests สำหรับ delayed acknowledgement, slow Mailbox transition และ unknown Event overlay
+- Full automated suite: **179 tests passed** และ Python compile gate ผ่าน
+
+## Release 1.4.20
+
+- แก้ **ส่งหัวใจหยุดเองหลังส่งไปหลายคน**: หากหน้าต่าง `Message sent!` โผล่ช้าหลังหน้า Friends สว่างกลับมาชั่วครู่ บอทจะตรวจพบและปิด Confirm ก่อนสแกนคนถัดไป
+- แก้ **รับหัวใจ Mailbox จบแล้วแต่ Confirm สุดท้ายค้าง**: ใช้ตำแหน่งปุ่มจริงจากภาพและตรวจซ้ำว่าหน้าต่าง `All Lives received and sent!` ปิดแล้วจริงก่อนรายงานว่าสำเร็จ
+- ปรับ fallback ของ Confirm สุดท้ายจาก `(640, 520)` เป็น `(640, 460)` ให้ตรงกับ UI เกมปัจจุบัน
+- ให้ `NEWS` / `ANNOUNCEMENT` มี priority เหนือ stage ของเกมที่ยังมองเห็นอยู่ด้านหลัง popup
+- หาก Main Menu ถูก overlay บัง บอทจะปิด popup ก่อนกด START แทนการรอให้ START ล้มเหลวหลายครั้ง
+- Regression suite: **176 tests passed** และทดสอบส่งหัวใจบนเกมจริงพบ/กู้ delayed acknowledgement ได้สำเร็จ
+
+## Release 1.4.19
+
+- แก้ **รับ/ส่งหัวใจจาก Mailbox หยุดกลางคัน**: ไม่ถือว่าเสร็จจากเฟรมมืดเพียงเฟรมเดียว และ retry หลายเฟรมก่อนสรุปว่าหน้า Mailbox หาย
+- รองรับกรณี Confirm ของหัวใจถัดไปขึ้นต่อทันทีโดยปุ่มเดิมไม่เคยหาย ด้วยการตรวจการเปลี่ยนแปลงของข้อมูลผู้ส่งเหนือปุ่ม Confirm
+- หาก Confirm ค้างจริง จะหยุดพร้อม error + debug screenshot แทนการรายงานผลบางส่วนว่าเสร็จแล้ว
+- แก้หน้า **News/Announcement ถูกตรวจผิดเป็น Anti-Bot** โดยให้ template ของ News/Announcement/Party Run มีสิทธิ์เหนือ heuristic แบบกว้างของ Anti-Bot
+- ปิด News จากตำแหน่ง X ที่ตรวจจาก template จริงก่อน แล้วค่อย fallback ไปพิกัดเดิมและ popup recovery
+- Regression suite: **172 passed + 12 subtests**.
 
 ## Release 1.4.18
 

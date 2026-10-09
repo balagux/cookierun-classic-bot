@@ -18,6 +18,7 @@ from config import (
     ANTI_BOT_CARD_WIDTH,
     DETECTION_ALWAYS_STAGES,
     STAGE_ANTI_BOT_REGION,
+    STAGE_NEWS_REGION,
     TEMPLATE_DIR,
 )
 from detection import (
@@ -81,6 +82,32 @@ class AntiBotTests(unittest.TestCase):
         self.assertEqual(detect_stage(screen, ("DAILY_CHECKIN",)), "DAILY_CHECKIN")
         self.assertIsNone(detect_stage(screen, ("ANTI_BOT",)))
         self.assertFalse(_is_anti_bot_screen(screen))
+
+    def test_news_template_overrides_broad_anti_bot_layout_heuristic(self):
+        screen = np.zeros((720, 1280, 3), dtype=np.uint8)
+        screen[10:112, 108:1172] = (220, 160, 20)
+        positions = (
+            ANTI_BOT_CARD_POS_1,
+            ANTI_BOT_CARD_POS_2,
+            ANTI_BOT_CARD_POS_3,
+            ANTI_BOT_CARD_POS_4,
+            ANTI_BOT_CARD_POS_5,
+            ANTI_BOT_CARD_POS_6,
+        )
+        for x, y in positions:
+            screen[
+                y + 10:y + ANTI_BOT_CARD_HEIGHT - 10,
+                x + 10:x + ANTI_BOT_CARD_WIDTH - 10,
+            ] = (220, 220, 220)
+
+        news = cv2.imread(str(Path(TEMPLATE_DIR) / "NEWS_TITLE_1.png"))
+        self.assertIsNotNone(news)
+        x1, y1, _, _ = STAGE_NEWS_REGION
+        height, width = news.shape[:2]
+        screen[y1:y1 + height, x1:x1 + width] = news
+
+        self.assertFalse(_is_anti_bot_screen(screen))
+        self.assertEqual(detect_stage(screen, ("ANTI_BOT", "NEWS")), "NEWS")
 
     def _anti_bot_layout_with_known_header(self):
         screen = np.zeros((720, 1280, 3), dtype=np.uint8)

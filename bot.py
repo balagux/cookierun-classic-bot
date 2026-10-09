@@ -274,6 +274,13 @@ def get_detection_stage_names(group_name, claim_relic_rewards=True):
         # The red "Get!" button remains visible while completed parts are being
         # saved. Ignore it so MAINMENU/PURCHASE_ITEM can still drive the bot.
         stage_names = [name for name in stage_names if name != "RELIC_COMPLETE"]
+    # Event/news dialogs sit on top of the current game screen while the
+    # underlying gameplay template can remain visible. Give blockers priority
+    # so they are closed before we act on obscured controls underneath them.
+    for popup_stage in ("NEWS", "ANNOUNCEMENT"):
+        if popup_stage in stage_names:
+            stage_names.remove(popup_stage)
+            stage_names.insert(0, popup_stage)
     return stage_names
 
 
@@ -834,6 +841,32 @@ def main(options=None, device_ip=None, device_port=None):
 
             if stage == "MAINMENU":
                 print("🎮 Detected Stage: MAINMENU")
+                # A popup can leave the MAINMENU template visible underneath a
+                # dark overlay. Close it before tapping START; waiting for a
+                # swallowed START tap made event/news dialogs look ignored.
+                if not actions_module.main_menu_start_area_clear(device_screen):
+                    print("Overlay detected over Main Menu - closing it first...")
+                    main_menu_start_pending = False
+                    main_menu_start_failures = 0
+                    if actions_module.dismiss_overlay_over_main_menu():
+                        last_stage = None
+                        continue
+                    _reset_app_or_raise(
+                        "An overlay is blocking the main menu START button."
+                    )
+                    close_announcement_dialog()
+                    session_start_time = time.time()
+                    session_reset_interval = random.uniform(*SESSION_RESET_INTERVAL)
+                    detection_group = "PRE_GAME"
+                    run_in_progress = False
+                    run_durations.cancel()
+                    box_stats.cancel_run()
+                    relay_quick_exit_pending = False
+                    relay_quick_exit_rewards = {"coins": 0, "exp": 0}
+                    last_stage = None
+                    is_first_game = True
+                    continue
+
                 # A run start normally advances to PURCHASE_ITEM/GAME_START on
                 # the next capture.  When START was just pressed here and the
                 # loop is still on MAINMENU, an event/announcement popup that
